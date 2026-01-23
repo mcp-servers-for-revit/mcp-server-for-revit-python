@@ -29,11 +29,17 @@ def register_code_execution_routes(api):
         }
         """
         try:
-            # Parse the request data
+            # Parse the request data with explicit encoding handling
+            # Handle both string and bytes data from the HTTP request
+            if isinstance(request.data, bytes):
+                request_data = request.data.decode('utf-8', errors='replace')
+            else:
+                request_data = request.data
+            
             data = (
-                json.loads(request.data)
-                if isinstance(request.data, str)
-                else request.data
+                json.loads(request_data)
+                if isinstance(request_data, str)
+                else request_data
             )
             code_to_execute = data.get("code", "")
             description = data.get("description", "Code execution")
@@ -118,6 +124,19 @@ def register_code_execution_routes(api):
 
         except Exception as e:
             logger.error("Execute code request failed: {}".format(str(e)))
+            
+            # Provide specific error message for encoding issues
+            error_str = str(e)
+            if "encoding" in error_str.lower() or "codepage" in error_str.lower():
+                return routes.make_response(
+                    data={
+                        "error": "Encoding error - .NET CodePages encoding provider may not be registered",
+                        "details": error_str,
+                        "suggestion": "Ensure System.Text.Encoding.CodePages is registered at startup"
+                    },
+                    status=500
+                )
+            
             return routes.make_response(data={"error": str(e)}, status=500)
 
     logger.info("Code execution routes registered successfully.")

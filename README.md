@@ -150,6 +150,33 @@ mcp dev main.py
 
 Then access `http://127.0.0.1:6274` in your browser to test your MCP server interactively.
 
+### Transport Modes
+
+The MCP server supports multiple transport modes for different use cases:
+
+| Flag | Transport | Endpoints | Use Case |
+|------|-----------|-----------|----------|
+| (none) | stdio | stdin/stdout | Claude Desktop default |
+| `--sse` | SSE only | `/sse`, `/messages/` | Legacy clients |
+| `--streamable-http` | HTTP only | `/mcp` | Modern HTTP clients |
+| `--combined` | Both | All above | Maximum compatibility |
+
+**Running with combined transport (recommended for HTTP):**
+```bash
+uv run --with "mcp[cli]" main.py --combined
+```
+
+This starts the server on `http://127.0.0.1:8000` with both SSE and streamable-HTTP endpoints available.
+
+**Testing the endpoints:**
+```bash
+# Test streamable-http
+curl -X POST http://localhost:8000/mcp
+
+# Test SSE
+curl http://localhost:8000/sse
+```
+
 ### Connecting to Claude Desktop
 
 The simplest way to install your MCP server in Claude Desktop:
@@ -176,6 +203,17 @@ Or for manual installation:
         "run",
         "/absolute/path/to/main.py"
       ]
+    }
+  }
+}
+```
+
+For HTTP transport mode, configure Claude Desktop with:
+```json
+{
+  "mcpServers": {
+    "Revit Connector": {
+      "url": "http://localhost:8000/mcp"
     }
   }
 }
