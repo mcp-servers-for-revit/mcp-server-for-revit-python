@@ -1,4 +1,4 @@
-# Revit MCP Python
+# MCP server for Revit - Python
 
 ## A pyRevit-oriented implementation of the Model Context Protocol (MCP) for Autodesk Revit
 
