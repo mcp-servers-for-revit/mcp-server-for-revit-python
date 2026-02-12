@@ -1,4 +1,4 @@
-# MCP Server for Revit with Python
+# MCP server for Revit - Python
 
 ## A pyRevit-oriented implementation of the Model Context Protocol (MCP) for Autodesk Revit
 
@@ -110,7 +110,7 @@ pyRevit will start listening on port `http://localhost:48884/`
 
 1. Clone the repo in a custom location:
     ```bash
-    git clone https://github.com/revit-mcp/revit-mcp-python
+    git clone https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python
     ```
 2. Add `.extension` to the root folder name
 3. In Revit, navigate to the pyRevit tab
