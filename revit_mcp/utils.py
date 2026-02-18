@@ -7,10 +7,32 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_string(text):
-    """Safely normalize string values"""
+    """Safely normalize string values, always returning a unicode string.
+
+    In IronPython 2, calling str() on a .NET System.String that contains
+    non-ASCII characters (e.g. accented letters) produces a byte string
+    encoded with the system default codec.  The pyRevit Routes JSON encoder
+    then fails with 'unknown codec can't decode byte 0xNN'.
+
+    By returning unicode we guarantee the JSON serialiser receives a proper
+    text object regardless of the locale of the Revit model.
+    """
     if text is None:
-        return "Unnamed"
-    return str(text).strip()
+        return u"Unnamed"
+    # Already a unicode string (normal case for .NET System.String in IronPython)
+    if isinstance(text, unicode):
+        return text.strip()
+    # Byte string — decode with a permissive fallback
+    if isinstance(text, str):
+        try:
+            return text.decode("utf-8").strip()
+        except (UnicodeDecodeError, AttributeError):
+            return text.decode("latin-1").strip()
+    # Any other type (.NET object, int, etc.) — convert via unicode()
+    try:
+        return unicode(text).strip()
+    except Exception:
+        return u"Unnamed"
 
 
 def get_element_name(element):

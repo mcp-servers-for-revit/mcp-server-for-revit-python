@@ -54,7 +54,8 @@ def format_response(response):
                 
                 return "\n".join(status_parts)
             else:
-                return "Operation completed successfully"
+                import json
+                return json.dumps(response, indent=2)
         else:
             # Error case - provide verbose debugging information
             error_msg = response.get("error", "Unknown error occurred")

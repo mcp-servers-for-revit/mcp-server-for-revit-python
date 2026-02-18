@@ -312,6 +312,7 @@ def register_model_info_routes(api):
 
             # ============ COMPILE RESPONSE ============
             model_data = {
+                "status": "success",
                 "project_info": project_info,
                 "element_summary": {
                     "total_elements": total_elements,

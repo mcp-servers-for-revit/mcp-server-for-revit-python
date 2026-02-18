@@ -149,6 +149,17 @@ cli = [
 ]
 
 [[package]]
+name = "mcp-server-for-revit"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "mcp", extra = ["cli"] },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mcp", extras = ["cli"], specifier = ">=1.9.0" }]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -299,17 +310,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b2
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755 },
 ]
-
-[[package]]
-name = "simple-revit-mcp"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "mcp", extra = ["cli"] },
-]
-
-[package.metadata]
-requires-dist = [{ name = "mcp", extras = ["cli"], specifier = ">=1.9.0" }]
 
 [[package]]
 name = "sniffio"

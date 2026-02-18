@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """View-related tools for capturing and listing Revit views"""
 
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp import Context, Image
+from typing import Union
 from .utils import format_response
 
 
@@ -9,11 +10,9 @@ def register_view_tools(mcp, revit_get, revit_post, revit_image):
     """Register view-related tools"""
 
     @mcp.tool()
-    async def get_revit_view(view_name: str, ctx: Context = None) -> str:
+    async def get_revit_view(view_name: str, ctx: Context = None) -> Union[Image, str]:
         """Export a specific Revit view as an image"""
-        response = await revit_image(f"/get_view/{view_name}", ctx)
-        # Note: revit_image already returns a formatted response (Image object or error string)
-        return str(response) if not isinstance(response, str) else response
+        return await revit_image(f"/get_view/{view_name}", ctx)
 
     @mcp.tool()
     async def list_revit_views(ctx: Context = None) -> str:
