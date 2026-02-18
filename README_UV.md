@@ -17,7 +17,7 @@ For other platforms, see the [uv installation guide](https://docs.astral.sh/uv/g
 
 1. Fork or clone the repo: 
    ```
-   https://github.com/JotaDeRodriguez/simple_revit_mcp
+   https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python
    ```
 
 2. Create and activate a virtual environment:

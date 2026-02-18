@@ -1,4 +1,4 @@
-# Revit MCP Python
+# MCP server for Revit - Python
 
 ## A pyRevit-oriented implementation of the Model Context Protocol (MCP) for Autodesk Revit
 
@@ -53,7 +53,7 @@ It contains:
 
 | Tool Name | Status | Category | Description |
 |-----------|--------|----------|-------------|
-| `get_revit_status` | ✅ Implemented | Status & Connectivity | Check if the Revit MCP API is active and responding |
+| `get_revit_status` | ✅ Implemented | Status & Connectivity | Check if the Revit-MCP API is active and responding |
 | `get_revit_model_info` | ✅ Implemented | Model Information | Get comprehensive information about the current Revit model |
 | `list_levels` | ✅ Implemented | Model Information | Get all levels with elevation information |
 | `get_revit_view` | ✅ Implemented | View & Image | Export a specific Revit view as an image |
@@ -101,7 +101,7 @@ pyRevit will start listening on port `http://localhost:48884/`
 
 1. In Revit, navigate to the pyRevit tab
 2. Open Extensions
-3. Select the Revit MCP Extension > Install extension
+3. Select the MCP Server for Revit Python Extension > Install extension
 4. Select location, default is `%APPDATA%\Roaming\pyRevit\Extensions`
 5. Enable and wait for pyRevit to reload. Restart Revit if necessary.
 
@@ -110,7 +110,7 @@ pyRevit will start listening on port `http://localhost:48884/`
 
 1. Clone the repo in a custom location:
     ```bash
-    git clone https://github.com/revit-mcp/revit-mcp-python
+    git clone https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python
     ```
 2. Add `.extension` to the root folder name
 3. In Revit, navigate to the pyRevit tab
