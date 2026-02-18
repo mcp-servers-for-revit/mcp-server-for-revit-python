@@ -10,3 +10,4 @@ wheels/
 .venv
 
 *TODO.md
+.env
