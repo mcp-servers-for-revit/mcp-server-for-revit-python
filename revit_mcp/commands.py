@@ -56,7 +56,7 @@ def _read_log_since(log_path, offset):
 def register_commands_routes(api):
     """Register all commands-related routes with the API"""
 
-    @api.route('/list', methods=['GET'])
+    @api.route('/commands_list', methods=['GET'])
     def get_commands(uiapp):
         """List all loaded pyRevit commands with their control IDs."""
         from pyrevit.loader import sessionmgr
@@ -72,7 +72,7 @@ def register_commands_routes(api):
             for cmd in commands
         ]
 
-    @api.route('/run', methods=['POST'])
+    @api.route('/commands_run', methods=['POST'])
     def run_command(request, uiapp):
         """Run a pyRevit command by control ID.
 
@@ -90,7 +90,6 @@ def register_commands_routes(api):
         data = request.data or {}
         control_id = data.get('control_id', None)
         wait = data.get('wait', True)
-        mlogger = get_logger("route-command-runner")
 
         if not control_id:
             return {"error": "control_id is required in request body"}
@@ -101,7 +100,7 @@ def register_commands_routes(api):
             if command_id is None:
                 return {"error": "Command not found: {}".format(control_id)}
             uiapp.PostCommand(command_id)
-            return {"status": "posted", "control_id": control_id}
+            return {"result": "posted", "control_id": control_id}
 
 
         cmd = next((c for c in sessionmgr.find_all_commands()
@@ -143,7 +142,7 @@ def register_commands_routes(api):
         execution_log = _read_log_since(log_path, log_offset) if log_path else None
 
         response = {
-            "status": str(result) if result else  'error',
+            "result": str(result) if result else  'error',
             "execution_time": str(datetime.now() - now),
             "command": {
                 "name": cmd.name,
@@ -157,8 +156,8 @@ def register_commands_routes(api):
             response["error"] = except_info
 
         if execution_log is not None:
-            response["log"] = execution_log
+            response["output"] = execution_log
         else:
-            response["log"] = "Logs are disabled or failed to collect. You can turn them on in the PyRevit Settings"
+            response["output"] = "Logs are disabled or failed to collect. You can turn them on in the PyRevit Settings"
 
         return response
