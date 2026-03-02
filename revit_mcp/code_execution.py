@@ -30,7 +30,6 @@ def register_code_execution_routes(api):
         {
             "code": "python code as string",
             "description": "optional description of what the code does",
-            "use_transaction": true   # set false for UI ops like switching the active view
         }
         """
         try:
