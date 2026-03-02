@@ -15,7 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 def register_code_execution_routes(api):
-    """Register code execution routes with the API."""
+    """Register code execution routes with the API.
+
+    ** WARNING ** : this can run 'ANY' code you give it, this can be a major security risk, only send it code that you trust.
+
+    """
 
     @api.route("/execute_code/", methods=["POST"])
     def execute_code(doc, uidoc, request):
@@ -26,10 +30,10 @@ def register_code_execution_routes(api):
         {
             "code": "python code as string",
             "description": "optional description of what the code does",
-            "use_transaction": true   # set false for UI ops like switching the active view
         }
         """
         try:
+            
             # Parse the request data
             data = (
                 json.loads(request.data)
@@ -84,7 +88,6 @@ def register_code_execution_routes(api):
             except Exception as exec_error:
                 sys.stdout = old_stdout
                 partial_output = captured_output.getvalue()
-                captured_output.close()
 
                 error_traceback = traceback.format_exc()
                 error_type = type(exec_error).__name__
@@ -136,5 +139,8 @@ def register_code_execution_routes(api):
         except Exception as e:
             logger.error("Execute code request failed: {}".format(str(e)))
             return routes.make_response(data={"error": str(e)}, status=500)
+        finally:
+            sys.stdout = old_stdout
+            captured_output.close()
 
     logger.info("Code execution routes registered successfully.")
