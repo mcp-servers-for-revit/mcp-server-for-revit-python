@@ -45,6 +45,28 @@ def register_routes():
 
         register_document_routes(api)
 
+        # ---- Tools added 2026-05-18: 9 new endpoints ----
+        from revit_mcp.selection import register_selection_routes
+
+        register_selection_routes(api)
+
+        from revit_mcp.element_creation import register_element_creation_routes
+
+        register_element_creation_routes(api)
+
+        from revit_mcp.element_management import register_element_management_routes
+
+        register_element_management_routes(api)
+
+        from revit_mcp.annotation import register_annotation_routes
+
+        register_annotation_routes(api)
+
+        from revit_mcp.integration import register_integration_routes
+
+        register_integration_routes(api)
+        # ---- end 2026-05-18 additions ----
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:
