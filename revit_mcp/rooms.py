@@ -16,6 +16,7 @@ batch can be added later if a real workflow demands it.
 
 from pyrevit import routes, revit, DB
 from utils import normalize_string, element_id_value
+from System import Int64
 import json
 import traceback
 import logging
@@ -51,7 +52,7 @@ def _resolve_level(doc, level_id=None, elevation_mm=None):
     """
     if level_id is not None:
         try:
-            lid = DB.ElementId(int(level_id))
+            lid = DB.ElementId(Int64(int(level_id)))
         except Exception:
             return None, "level_id must be an integer"
         el = doc.GetElement(lid)
@@ -206,7 +207,7 @@ def _set_elemid_param(elem, bip, value_id):
     p = elem.get_Parameter(bip)
     if p is not None and not p.IsReadOnly:
         try:
-            p.Set(DB.ElementId(int(value_id)))
+            p.Set(DB.ElementId(Int64(int(value_id))))
         except Exception:
             pass
 
