@@ -69,6 +69,10 @@ def register_routes():
         from revit_mcp.grids import register_grids_routes
 
         register_grids_routes(api)
+
+        from revit_mcp.levels import register_levels_routes
+
+        register_levels_routes(api)
         # ---- end 2026-05-18 additions ----
 
         logger.info("All MCP routes registered successfully")
