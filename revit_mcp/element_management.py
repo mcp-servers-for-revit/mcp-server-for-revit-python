@@ -10,6 +10,7 @@ user-facing layer.
 
 from pyrevit import routes, revit, DB
 from utils import normalize_string, element_id_value, get_element_name
+from System import Int64
 import json
 import traceback
 import logging
@@ -111,7 +112,7 @@ def register_element_management_routes(api):
             valid_ids = []
             for raw_id in ids:
                 try:
-                    eid = DB.ElementId(int(raw_id))
+                    eid = DB.ElementId(Int64(int(raw_id)))
                     el = doc.GetElement(eid)
                     if el is None:
                         preview.append({"id": int(raw_id), "status": "not_found"})
@@ -188,7 +189,7 @@ def register_element_management_routes(api):
             if not isinstance(params, dict) or not params:
                 return routes.make_response(data={"error": "parameters must be a non-empty dict"}, status=400)
 
-            eid = DB.ElementId(int(raw_id))
+            eid = DB.ElementId(Int64(int(raw_id)))
             el = doc.GetElement(eid)
             if el is None:
                 return routes.make_response(data={"error": "Element {} not found".format(raw_id)}, status=404)
@@ -213,7 +214,7 @@ def register_element_management_routes(api):
                         elif st == DB.StorageType.Double:
                             p.Set(float(value))
                         elif st == DB.StorageType.ElementId:
-                            p.Set(DB.ElementId(int(value)))
+                            p.Set(DB.ElementId(Int64(int(value))))
                         else:
                             results.append({"parameter": name, "status": "unsupported_storage_type", "storage": str(st)})
                             continue

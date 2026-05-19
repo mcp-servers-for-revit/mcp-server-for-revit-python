@@ -9,6 +9,7 @@ Internally converted to Revit's decimal-feet via UnitUtils.
 
 from pyrevit import routes, revit, DB
 from utils import normalize_string, element_id_value
+from System import Int64
 import json
 import traceback
 import logging
@@ -81,7 +82,7 @@ def _set_instance_parameters(element, properties):
                 # Caller is responsible for unit conversion; accept raw float
                 p.Set(float(value))
             elif st == DB.StorageType.ElementId:
-                p.Set(DB.ElementId(int(value)))
+                p.Set(DB.ElementId(Int64(int(value))))
             written.append(name)
         except Exception as pe:
             logger.warning("Could not set parameter {}: {}".format(name, str(pe)))
