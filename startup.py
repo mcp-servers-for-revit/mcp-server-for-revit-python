@@ -94,6 +94,11 @@ def register_routes():
         from revit_mcp.element_filter import register_element_filter_routes
 
         register_element_filter_routes(api)
+
+        # ---- 2026-05-19: model-statistics rollup (ported from Sparx AnalyzeModelStatistics) ----
+        from revit_mcp.model_statistics import register_model_statistics_routes
+
+        register_model_statistics_routes(api)
         # ---- end 2026-05-19 additions ----
 
         logger.info("All MCP routes registered successfully")
