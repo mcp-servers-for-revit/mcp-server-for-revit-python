@@ -35,6 +35,8 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .model_statistics_tools import register_model_statistics_tools
     # Added 2026-05-19 (+1): room tagging (ported from Sparx TagRooms)
     from .room_annotation_tools import register_room_annotation_tools
+    # Added 2026-05-19 (+1): room-data export (ported from Sparx ExportRoomData)
+    from .room_data_tools import register_room_data_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -61,3 +63,4 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_element_filter_tools(mcp_server, revit_get_func, revit_post_func)
     register_model_statistics_tools(mcp_server, revit_get_func, revit_post_func)
     register_room_annotation_tools(mcp_server, revit_get_func, revit_post_func)
+    register_room_data_tools(mcp_server, revit_get_func, revit_post_func)

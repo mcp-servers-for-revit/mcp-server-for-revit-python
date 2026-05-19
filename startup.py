@@ -104,6 +104,11 @@ def register_routes():
         from revit_mcp.room_annotation import register_room_annotation_routes
 
         register_room_annotation_routes(api)
+
+        # ---- 2026-05-19: room data export (ported from Sparx ExportRoomData) ----
+        from revit_mcp.room_data import register_room_data_routes
+
+        register_room_data_routes(api)
         # ---- end 2026-05-19 additions ----
 
         logger.info("All MCP routes registered successfully")
