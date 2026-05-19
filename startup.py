@@ -75,6 +75,12 @@ def register_routes():
         register_levels_routes(api)
         # ---- end 2026-05-18 additions ----
 
+        # ---- 2026-05-19: rooms (ported from Sparx) ----
+        from revit_mcp.rooms import register_rooms_routes
+
+        register_rooms_routes(api)
+        # ---- end 2026-05-19 additions ----
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:

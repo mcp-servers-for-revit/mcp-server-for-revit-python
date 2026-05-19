@@ -23,6 +23,8 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .grids_tools import register_grids_tools
     # Added 2026-05-18 (+1): levels
     from .levels_tools import register_levels_tools
+    # Added 2026-05-19 (+1): rooms (ported from Sparx)
+    from .rooms_tools import register_rooms_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -43,3 +45,4 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_integration_tools(mcp_server, revit_get_func, revit_post_func)
     register_grids_tools(mcp_server, revit_get_func, revit_post_func)
     register_levels_tools(mcp_server, revit_get_func, revit_post_func)
+    register_rooms_tools(mcp_server, revit_get_func, revit_post_func)
