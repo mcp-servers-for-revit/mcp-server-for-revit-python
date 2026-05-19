@@ -19,6 +19,8 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .element_management_tools import register_element_management_tools
     from .annotation_tools import register_annotation_tools
     from .integration_tools import register_integration_tools
+    # Added 2026-05-18 (+1): grids
+    from .grids_tools import register_grids_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -37,3 +39,4 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_element_management_tools(mcp_server, revit_get_func, revit_post_func)
     register_annotation_tools(mcp_server, revit_get_func, revit_post_func)
     register_integration_tools(mcp_server, revit_get_func, revit_post_func)
+    register_grids_tools(mcp_server, revit_get_func, revit_post_func)
