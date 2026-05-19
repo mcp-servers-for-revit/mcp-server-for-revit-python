@@ -99,6 +99,11 @@ def register_routes():
         from revit_mcp.model_statistics import register_model_statistics_routes
 
         register_model_statistics_routes(api)
+
+        # ---- 2026-05-19: room tagging (ported from Sparx TagRooms) ----
+        from revit_mcp.room_annotation import register_room_annotation_routes
+
+        register_room_annotation_routes(api)
         # ---- end 2026-05-19 additions ----
 
         logger.info("All MCP routes registered successfully")
