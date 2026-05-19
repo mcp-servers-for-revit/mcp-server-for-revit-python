@@ -176,6 +176,41 @@ def _unique_number_from(requested, existing):
     return requested  # last resort
 
 
+def _find_placed_rooms_on_level(doc, level, x_ft, y_ft):
+    """Enumerate placed rooms on `level` so callers can see which existing room is
+    likely occupying the area at (x_ft, y_ft). When Revit's IsPointInRoom is
+    available, rooms whose footprint contains the point are flagged first.
+    """
+    out = []
+    test_point = DB.XYZ(x_ft, y_ft, level.Elevation + _mm_to_feet(50.0))
+    rooms = DB.FilteredElementCollector(doc) \
+        .OfCategory(DB.BuiltInCategory.OST_Rooms) \
+        .WhereElementIsNotElementType()
+    for r in rooms:
+        try:
+            if r.LevelId != level.Id:
+                continue
+            if float(r.Area) <= 0.0:
+                continue
+            contains = None
+            try:
+                contains = bool(r.IsPointInRoom(test_point))
+            except Exception:
+                pass
+            name_param = r.get_Parameter(DB.BuiltInParameter.ROOM_NAME)
+            name_str = name_param.AsString() if name_param is not None else ""
+            out.append({
+                "id": element_id_value(r.Id),
+                "number": r.Number,
+                "name": normalize_string(name_str or ""),
+                "contains_requested_point": contains,
+            })
+        except Exception:
+            continue
+    out.sort(key=lambda e: (e.get("contains_requested_point") is not True,))
+    return out
+
+
 def _set_string_param(elem, bip, value):
     """Set a BuiltInParameter string if non-empty and writable. No-op otherwise."""
     if not value:
@@ -238,8 +273,10 @@ def register_rooms_routes(api):
         If both level_id and elevation_mm are omitted, the lowest-elevation
         level in the project is used.
 
-        Returns status='success' with the created room metadata, OR
-        status='not_in_enclosed_area' if the point isn't inside walls/separators.
+        Returns status='success' with the created room metadata; OR
+        status='not_in_enclosed_area' if the point isn't inside walls/separators;
+        OR status='area_already_occupied' if the enclosure already contains a
+        placed room (Revit would otherwise create a junk "unplaced" record).
         """
         try:
             if not doc:
@@ -307,6 +344,22 @@ def register_rooms_routes(api):
                                      x_mm, y_mm, normalize_string(level.Name)),
                         "level_name": normalize_string(level.Name),
                         "level_id": element_id_value(level.Id),
+                    })
+
+                # Revit also returns a non-None room with Area == 0 when the point
+                # falls inside an area already occupied by another placed room. The
+                # new record is "unplaced" — visible in schedules but with no
+                # spatial footprint. Roll back so we don't litter the project.
+                if float(room.Area) == 0.0:
+                    existing = _find_placed_rooms_on_level(doc, level, x_ft, y_ft)
+                    t.RollBack()
+                    return routes.make_response(data={
+                        "status": "area_already_occupied",
+                        "error": "Revit created an unplaced room because the area at ({:.1f}, {:.1f}) on level '{}' is already occupied by another room. Delete or move the existing room before creating a new one in this area.".format(
+                            x_mm, y_mm, normalize_string(level.Name)),
+                        "level_name": normalize_string(level.Name),
+                        "level_id": element_id_value(level.Id),
+                        "existing_rooms_on_level": existing,
                     })
 
                 # Set the name + number first (must be done before any other parameter
