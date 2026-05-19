@@ -27,6 +27,8 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .rooms_tools import register_rooms_tools
     # Added 2026-05-19 (+1): dimensions (ported from Sparx)
     from .dimensions_tools import register_dimensions_tools
+    # Added 2026-05-19 (+1): material quantities (ported from Sparx)
+    from .material_quantities_tools import register_material_quantities_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -49,3 +51,4 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_levels_tools(mcp_server, revit_get_func, revit_post_func)
     register_rooms_tools(mcp_server, revit_get_func, revit_post_func)
     register_dimensions_tools(mcp_server, revit_get_func, revit_post_func)
+    register_material_quantities_tools(mcp_server, revit_get_func, revit_post_func)

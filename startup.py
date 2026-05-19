@@ -84,6 +84,11 @@ def register_routes():
         from revit_mcp.dimensions import register_dimensions_routes
 
         register_dimensions_routes(api)
+
+        # ---- 2026-05-19: material quantities (ported from Sparx) ----
+        from revit_mcp.material_quantities import register_material_quantities_routes
+
+        register_material_quantities_routes(api)
         # ---- end 2026-05-19 additions ----
 
         logger.info("All MCP routes registered successfully")
