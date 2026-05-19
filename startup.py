@@ -89,6 +89,11 @@ def register_routes():
         from revit_mcp.material_quantities import register_material_quantities_routes
 
         register_material_quantities_routes(api)
+
+        # ---- 2026-05-19: structured element filter (ported from Sparx AIElementFilter) ----
+        from revit_mcp.element_filter import register_element_filter_routes
+
+        register_element_filter_routes(api)
         # ---- end 2026-05-19 additions ----
 
         logger.info("All MCP routes registered successfully")
