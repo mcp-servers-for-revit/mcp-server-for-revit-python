@@ -8,7 +8,7 @@ Internally converted to Revit's decimal-feet via UnitUtils.
 """
 
 from pyrevit import routes, revit, DB
-from utils import normalize_string, element_id_value
+from utils import normalize_string, element_id_value, get_element_name
 from System import Int64
 import json
 import traceback
@@ -40,16 +40,21 @@ def _find_level_by_name(doc, level_name):
     """Locate a Level by exact name. Returns None if not found."""
     levels = DB.FilteredElementCollector(doc).OfClass(DB.Level)
     for lvl in levels:
-        if lvl.Name == level_name:
+        if get_element_name(lvl) == level_name:
             return lvl
     return None
 
 
 def _find_type_by_name(doc, type_class, type_name):
-    """Locate an ElementType (WallType / FloorType / CeilingType) by exact name."""
+    """Locate an ElementType (WallType / FloorType / CeilingType) by exact name.
+
+    Revit 2026 IronPython: ElementType subclasses raise AttributeError on direct
+    `.Name` access via the `Element` base ambiguity. Use the descriptor accessor
+    via `get_element_name()` (see utils.py).
+    """
     collector = DB.FilteredElementCollector(doc).OfClass(type_class)
     for t in collector:
-        if t.Name == type_name:
+        if get_element_name(t) == type_name:
             return t
     return None
 
