@@ -41,6 +41,8 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .element_operations_tools import register_element_operations_tools
     # Added 2026-05-20 (+1): workset creation
     from .workset_tools import register_workset_tools
+    # Added 2026-05-20 (+1): MEP-to-grid dimensioning
+    from .mep_dimensions_tools import register_mep_dimensions_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -70,3 +72,4 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_room_data_tools(mcp_server, revit_get_func, revit_post_func)
     register_element_operations_tools(mcp_server, revit_get_func, revit_post_func)
     register_workset_tools(mcp_server, revit_get_func, revit_post_func)
+    register_mep_dimensions_tools(mcp_server, revit_get_func, revit_post_func)

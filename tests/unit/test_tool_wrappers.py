@@ -10,6 +10,7 @@ from tools.colors_tools import register_colors_tools
 from tools.code_execution_tools import register_code_execution_tools
 from tools.element_operations_tools import register_element_operations_tools
 from tools.workset_tools import register_workset_tools
+from tools.mep_dimensions_tools import register_mep_dimensions_tools
 
 
 # ---- Status tools ----
@@ -315,3 +316,65 @@ class TestWorksetTools:
         )
         assert endpoint == "/create_workset/"
         assert payload == {"name": "Shell & Core"}
+
+
+# ---- MEP-to-grid dimensioning tool ----
+
+class TestMepDimensionsTools:
+    @pytest.fixture(autouse=True)
+    def setup(self, mock_mcp, mock_revit_get, mock_revit_post):
+        mock_revit_post.return_value = {
+            "status": "success",
+            "dimensions_created": 1,
+        }
+        register_mep_dimensions_tools(mock_mcp, mock_revit_get, mock_revit_post)
+        self.tools = mock_mcp.tools
+        self.mock_post = mock_revit_post
+
+    async def test_endpoint_and_defaults(self):
+        await self.tools["dimension_mep_to_grids"](ctx=None)
+        endpoint, payload = (
+            self.mock_post.call_args[0][0],
+            self.mock_post.call_args[0][1],
+        )
+        assert endpoint == "/dimension_mep_to_grids/"
+        assert payload["string_style"] == "continuous"
+        assert payload["grid_scope"] == "nearest"
+        assert payload["offset_mm"] == 2500.0
+        assert payload["gap_mm"] == 1200.0
+        assert payload["coordinate_tolerance_mm"] == 10.0
+        assert payload["max_elements"] == 200
+        assert payload["dry_run"] is False
+        assert payload["view_id"] is None
+        assert payload["element_ids"] is None
+        assert payload["categories"] is None
+        assert payload["dimension_style_id"] is None
+
+    async def test_element_ids_and_view_passed_through(self):
+        await self.tools["dimension_mep_to_grids"](
+            view_id=312, element_ids=[101, 202, 303], ctx=None
+        )
+        payload = self.mock_post.call_args[0][1]
+        assert payload["view_id"] == 312
+        assert payload["element_ids"] == [101, 202, 303]
+
+    async def test_individual_style_and_overrides(self):
+        await self.tools["dimension_mep_to_grids"](
+            string_style="individual",
+            grid_scope="all",
+            offset_mm=4000.0,
+            gap_mm=2000.0,
+            categories=["ducts", "pipes"],
+            ctx=None,
+        )
+        payload = self.mock_post.call_args[0][1]
+        assert payload["string_style"] == "individual"
+        assert payload["grid_scope"] == "all"
+        assert payload["offset_mm"] == 4000.0
+        assert payload["gap_mm"] == 2000.0
+        assert payload["categories"] == ["ducts", "pipes"]
+
+    async def test_dry_run_passed_through(self):
+        await self.tools["dimension_mep_to_grids"](dry_run=True, ctx=None)
+        payload = self.mock_post.call_args[0][1]
+        assert payload["dry_run"] is True

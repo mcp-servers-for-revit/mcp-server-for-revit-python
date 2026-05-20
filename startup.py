@@ -120,6 +120,11 @@ def register_routes():
         from revit_mcp.worksets import register_workset_routes
 
         register_workset_routes(api)
+
+        # ---- 2026-05-20: MEP-to-grid dimensioning ----
+        from revit_mcp.mep_dimensions import register_mep_dimensions_routes
+
+        register_mep_dimensions_routes(api)
         # ---- end 2026-05-20 additions ----
 
         logger.info("All MCP routes registered successfully")
