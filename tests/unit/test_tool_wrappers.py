@@ -9,6 +9,7 @@ from tools.family_tools import register_family_tools
 from tools.colors_tools import register_colors_tools
 from tools.code_execution_tools import register_code_execution_tools
 from tools.element_operations_tools import register_element_operations_tools
+from tools.workset_tools import register_workset_tools
 
 
 # ---- Status tools ----
@@ -291,3 +292,26 @@ class TestElementOperationsTools:
         )
         payload = self.mock_post.call_args[0][1]
         assert payload["view_id"] == 42
+
+
+# ---- Workset tool ----
+
+class TestWorksetTools:
+    @pytest.fixture(autouse=True)
+    def setup(self, mock_mcp, mock_revit_get, mock_revit_post):
+        mock_revit_post.return_value = {
+            "status": "success",
+            "workset": {"id": 1, "name": "Shell & Core"},
+        }
+        register_workset_tools(mock_mcp, mock_revit_get, mock_revit_post)
+        self.tools = mock_mcp.tools
+        self.mock_post = mock_revit_post
+
+    async def test_create_workset_payload(self):
+        await self.tools["create_workset"](name="Shell & Core", ctx=None)
+        endpoint, payload = (
+            self.mock_post.call_args[0][0],
+            self.mock_post.call_args[0][1],
+        )
+        assert endpoint == "/create_workset/"
+        assert payload == {"name": "Shell & Core"}

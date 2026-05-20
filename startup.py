@@ -115,6 +115,11 @@ def register_routes():
         from revit_mcp.element_operations import register_element_operations_routes
 
         register_element_operations_routes(api)
+
+        # ---- 2026-05-20: workset creation ----
+        from revit_mcp.worksets import register_workset_routes
+
+        register_workset_routes(api)
         # ---- end 2026-05-20 additions ----
 
         logger.info("All MCP routes registered successfully")
