@@ -10,8 +10,9 @@ status='not_workshared' otherwise -- it deliberately does NOT enable
 worksharing itself, because EnableWorksharing is a one-way, model-wide
 change that should be an explicit user decision, not an implicit side effect.
 
-Worksharing operations are not transactional: Workset.Create must NOT run
-inside a DB.Transaction.
+Workset.Create modifies the document and so requires an open DB.Transaction.
+(EnableWorksharing itself is non-transactional -- but this tool never calls
+it; enabling worksharing is left to the user.)
 """
 
 from pyrevit import routes, revit, DB
@@ -105,8 +106,11 @@ def register_workset_routes(api):
                     "error": "The workset name '{}' is not available.".format(name),
                 })
 
-            # Worksharing operations are not transactional -- no DB.Transaction.
-            new_ws = DB.Workset.Create(doc, name)
+            # Workset.Create modifies the document -- it requires a transaction.
+            with DB.Transaction(doc, "MCP: Create Workset") as t:
+                t.Start()
+                new_ws = DB.Workset.Create(doc, name)
+                t.Commit()
 
             return routes.make_response(data={
                 "status": "success",
