@@ -8,6 +8,7 @@ from tools.view_tools import register_view_tools
 from tools.family_tools import register_family_tools
 from tools.colors_tools import register_colors_tools
 from tools.code_execution_tools import register_code_execution_tools
+from tools.element_operations_tools import register_element_operations_tools
 
 
 # ---- Status tools ----
@@ -223,3 +224,70 @@ class TestCodeExecutionTools:
             code="print(1)", ctx=None
         )
         assert "Error during code execution" in result
+
+
+# ---- Element-operations tool ----
+
+class TestElementOperationsTools:
+    @pytest.fixture(autouse=True)
+    def setup(self, mock_mcp, mock_revit_get, mock_revit_post):
+        mock_revit_post.return_value = {"status": "success", "action": "select"}
+        register_element_operations_tools(
+            mock_mcp, mock_revit_get, mock_revit_post
+        )
+        self.tools = mock_mcp.tools
+        self.mock_post = mock_revit_post
+
+    async def test_select_payload(self):
+        await self.tools["operate_element"](
+            action="select", element_ids=[101, 202], ctx=None
+        )
+        endpoint, payload = self.mock_post.call_args[0][0], self.mock_post.call_args[0][1]
+        assert endpoint == "/operate_element/"
+        assert payload["action"] == "select"
+        assert payload["element_ids"] == [101, 202]
+        assert payload["confirm"] is False
+
+    async def test_set_color_includes_color(self):
+        await self.tools["operate_element"](
+            action="set_color", element_ids=[1], color=[255, 0, 0], ctx=None
+        )
+        payload = self.mock_post.call_args[0][1]
+        assert payload["color"] == [255, 0, 0]
+        assert "transparency" not in payload
+
+    async def test_set_transparency_includes_transparency(self):
+        await self.tools["operate_element"](
+            action="set_transparency", element_ids=[1], transparency=60, ctx=None
+        )
+        payload = self.mock_post.call_args[0][1]
+        assert payload["transparency"] == 60
+        assert "color" not in payload
+
+    async def test_delete_confirm_passed_through(self):
+        await self.tools["operate_element"](
+            action="delete", element_ids=[7], confirm=True, ctx=None
+        )
+        payload = self.mock_post.call_args[0][1]
+        assert payload["action"] == "delete"
+        assert payload["confirm"] is True
+
+    async def test_delete_defaults_to_preview(self):
+        await self.tools["operate_element"](
+            action="delete", element_ids=[7], ctx=None
+        )
+        payload = self.mock_post.call_args[0][1]
+        assert payload["confirm"] is False
+
+    async def test_reset_isolate_omits_element_ids(self):
+        await self.tools["operate_element"](action="reset_isolate", ctx=None)
+        payload = self.mock_post.call_args[0][1]
+        assert payload["action"] == "reset_isolate"
+        assert "element_ids" not in payload
+
+    async def test_view_id_coerced_to_int(self):
+        await self.tools["operate_element"](
+            action="hide", element_ids=[1], view_id=42, ctx=None
+        )
+        payload = self.mock_post.call_args[0][1]
+        assert payload["view_id"] == 42

@@ -111,6 +111,12 @@ def register_routes():
         register_room_data_routes(api)
         # ---- end 2026-05-19 additions ----
 
+        # ---- 2026-05-20: multi-action element operations (ported from Sparx OperateElementCommand) ----
+        from revit_mcp.element_operations import register_element_operations_routes
+
+        register_element_operations_routes(api)
+        # ---- end 2026-05-20 additions ----
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:

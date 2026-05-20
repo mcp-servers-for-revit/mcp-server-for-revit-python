@@ -37,6 +37,8 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .room_annotation_tools import register_room_annotation_tools
     # Added 2026-05-19 (+1): room-data export (ported from Sparx ExportRoomData)
     from .room_data_tools import register_room_data_tools
+    # Added 2026-05-20 (+1): multi-action element operations (ported from Sparx OperateElementCommand)
+    from .element_operations_tools import register_element_operations_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -64,3 +66,4 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_model_statistics_tools(mcp_server, revit_get_func, revit_post_func)
     register_room_annotation_tools(mcp_server, revit_get_func, revit_post_func)
     register_room_data_tools(mcp_server, revit_get_func, revit_post_func)
+    register_element_operations_tools(mcp_server, revit_get_func, revit_post_func)
