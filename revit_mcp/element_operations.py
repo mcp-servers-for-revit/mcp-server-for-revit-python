@@ -19,13 +19,14 @@ Supported actions (case-insensitive):
     reset_isolate    -- clear the temporary hide/isolate view mode
     delete           -- delete elements (confirm-gated; preview unless confirm)
 
+Note: every view-state mutation here -- including the temporary view modes
+(temp_hide / isolate / reset_isolate) -- is a transactional document change
+and runs inside a DB.Transaction. `select` is the only action that does not
+(UI selection is not a model change).
+
 Differences from the Sparx C# original:
   * Revit 2026: ElementId is built via a System.Int64 cast -- the bare int
     ctor `ElementId(int)` is ambiguous/removed on Revit 2026.
-  * The temporary view-mode calls (HideElementsTemporary / IsolateElements-
-    Temporary / DisableTemporaryViewMode) MUST NOT run inside a transaction
-    -- the Revit API forbids it. Sparx wraps all three in a Transaction, so
-    those actions throw. This port runs them transaction-free.
   * Returns structured statuses (element_not_found, not_3d_view, no_3d_view,
     no_bounding_box, invalid_color, ...) instead of throwing generic
     exceptions.
@@ -444,9 +445,12 @@ def register_element_operations_routes(api):
                 resp.update(view_meta)
                 return routes.make_response(data=resp)
 
-            # ===== TEMPORARY VIEW MODES (no transaction -- API forbids it) =====
+            # ===== TEMPORARY VIEW MODES (transactional view-state changes) =====
             if action == "temp_hide":
-                target_view.HideElementsTemporary(_id_collection(elem_ids))
+                with DB.Transaction(doc, "MCP: Operate Element (temp_hide)") as t:
+                    t.Start()
+                    target_view.HideElementsTemporary(_id_collection(elem_ids))
+                    t.Commit()
                 resp = {
                     "status": "success", "action": "temp_hide",
                     "affected_count": len(elem_ids),
@@ -459,7 +463,10 @@ def register_element_operations_routes(api):
                 return routes.make_response(data=resp)
 
             if action == "isolate":
-                target_view.IsolateElementsTemporary(_id_collection(elem_ids))
+                with DB.Transaction(doc, "MCP: Operate Element (isolate)") as t:
+                    t.Start()
+                    target_view.IsolateElementsTemporary(_id_collection(elem_ids))
+                    t.Commit()
                 resp = {
                     "status": "success", "action": "isolate",
                     "affected_count": len(elem_ids),
@@ -472,8 +479,11 @@ def register_element_operations_routes(api):
                 return routes.make_response(data=resp)
 
             if action == "reset_isolate":
-                target_view.DisableTemporaryViewMode(
-                    DB.TemporaryViewMode.TemporaryHideIsolate)
+                with DB.Transaction(doc, "MCP: Operate Element (reset_isolate)") as t:
+                    t.Start()
+                    target_view.DisableTemporaryViewMode(
+                        DB.TemporaryViewMode.TemporaryHideIsolate)
+                    t.Commit()
                 resp = {
                     "status": "success", "action": "reset_isolate",
                 }
