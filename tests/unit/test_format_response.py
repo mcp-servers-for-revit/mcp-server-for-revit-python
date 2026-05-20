@@ -92,6 +92,107 @@ class TestErrorResponses:
         assert "Code Attempted: print(1)" in result
         assert "Endpoint: /test/" in result
 
+    def test_error_message_fallback_when_no_error_key(self):
+        # An error response carrying only "message" should surface it instead
+        # of the generic "Unknown error occurred" placeholder.
+        result = format_response({"status": "error", "message": "boom"})
+        assert "Error: boom" in result
+        assert "Unknown error occurred" not in result
+
+    def test_unlisted_failure_status_still_error_framed(self):
+        # create_failed is a genuine failure -- NOT a recoverable status.
+        result = format_response(
+            {"status": "create_failed", "error": "Revit returned no element."}
+        )
+        assert "=== ERROR DETAILS ===" in result
+        assert "Error: Revit returned no element." in result
+
+
+class TestRecoverableResponses:
+    """Recoverable statuses are expected, non-error outcomes -- they must not
+    be dressed up with error/traceback framing."""
+
+    def test_empty_result_not_error_framed(self):
+        result = format_response(
+            {
+                "status": "no_rooms_found",
+                "applied_filters": ["level=Level 1"],
+                "skipped_unplaced": 2,
+            }
+        )
+        assert "=== NO ROOMS FOUND ===" in result
+        assert "=== ERROR DETAILS ===" not in result
+        assert "Unknown error occurred" not in result
+
+    def test_recoverable_preserves_structured_data(self):
+        result = format_response(
+            {
+                "status": "no_rooms_found",
+                "applied_filters": ["level=Level 1"],
+                "skipped_unplaced": 2,
+            }
+        )
+        assert "applied_filters" in result
+        assert "skipped_unplaced" in result
+
+    def test_note_read_from_error_key(self):
+        # Some recoverable responses carry their explanation under "error".
+        result = format_response(
+            {
+                "status": "area_already_occupied",
+                "error": "The area is already occupied by another room.",
+                "level_name": "Level 1",
+            }
+        )
+        assert "=== ERROR DETAILS ===" not in result
+        assert "The area is already occupied by another room." in result
+
+    def test_note_read_from_message_key(self):
+        result = format_response(
+            {
+                "status": "no_op",
+                "message": "Nothing to delete in the requested categories.",
+            }
+        )
+        assert "=== ERROR DETAILS ===" not in result
+        assert "Nothing to delete in the requested categories." in result
+
+    def test_preview_status_is_recoverable(self):
+        result = format_response(
+            {
+                "status": "preview",
+                "confirm_required": True,
+                "would_delete_count": 5,
+            }
+        )
+        assert "=== PREVIEW ===" in result
+        assert "=== ERROR DETAILS ===" not in result
+        assert "would_delete_count" in result
+
+    def test_dry_run_status_is_recoverable(self):
+        result = format_response({"status": "dry_run", "planned": 12})
+        assert "=== DRY RUN ===" in result
+        assert "=== ERROR DETAILS ===" not in result
+
+    def test_lookup_miss_is_recoverable(self):
+        result = format_response(
+            {"status": "view_not_found", "error": "View 999 does not exist."}
+        )
+        assert "=== ERROR DETAILS ===" not in result
+        assert "Unknown error occurred" not in result
+        assert "View 999 does not exist." in result
+
+    def test_recoverable_with_details(self):
+        result = format_response(
+            {
+                "status": "view_not_supported",
+                "message": "View is not a plan view.",
+                "details": "Active view type is Section.",
+            }
+        )
+        assert "Details: Active view type is Section." in result
+        assert "=== ERROR DETAILS ===" not in result
+
 
 class TestStringPassthrough:
     def test_string_passthrough(self):
