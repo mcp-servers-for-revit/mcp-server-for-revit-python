@@ -60,6 +60,20 @@ class TestActiveStatusResponses:
         result = format_response(resp)
         assert "API: RevitMCP" in result
 
+    def test_active_revit_available_false_is_error(self):
+        # revit_available=False does not satisfy the success condition
+        result = format_response({"status": "active", "revit_available": False})
+        assert "=== ERROR DETAILS ===" in result
+
+    def test_active_healthy_with_extra_fields(self):
+        resp = {
+            "status": "active",
+            "health": "healthy",
+            "custom_field": "custom_value",
+        }
+        result = format_response(resp)
+        assert "Custom Field: custom_value" in result
+
 
 class TestErrorResponses:
     def test_error_response(self):
@@ -91,6 +105,13 @@ class TestErrorResponses:
         )
         assert "Code Attempted: print(1)" in result
         assert "Endpoint: /test/" in result
+
+    def test_error_with_additional_unknown_fields(self):
+        result = format_response(
+            {"status": "error", "error": "fail", "unexpected_key": "some_value"}
+        )
+        assert "=== ADDITIONAL RESPONSE DATA ===" in result
+        assert "some_value" in result
 
 
 class TestStringPassthrough:
