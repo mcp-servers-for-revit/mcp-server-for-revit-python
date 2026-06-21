@@ -7,45 +7,49 @@ import pytest
 from tools.launch_tools import _find_revit_installations
 
 
-def _make_mock_winreg(subkeys_by_hive=None):
+def _make_mock_winreg(entries=None):
     """Build a mock winreg module.
 
-    subkeys_by_hive: dict mapping hive constant -> list of
-        (subkey_name, {value_name: value_data}) dicts
+    entries: list of (subkey_name, value_name, install_dir) tuples, e.g.
+        [("Autodesk Revit 2025", "InstallationLocation", "C:/Revit2025/")]
+
+    winreg.OpenKey is called twice per subkey: once with an integer hive
+    constant to open the base key, and again with the returned handle to open
+    the named subkey.  The original helper only handled the first call, so the
+    subkey open always raised OSError and the registry branch was never reachable.
+    This version handles both call forms.
     """
     mock_winreg = MagicMock()
     mock_winreg.HKEY_LOCAL_MACHINE = 0x80000002
     mock_winreg.HKEY_CURRENT_USER = 0x80000001
 
-    if subkeys_by_hive is None:
-        subkeys_by_hive = {}
+    if entries is None:
+        entries = []
 
-    def open_key(hive, path):
-        if hive not in subkeys_by_hive:
-            raise OSError("Key not found")
-        return MagicMock(name=f"key_{hive}")
+    def open_key(key_or_hive, name):
+        if isinstance(key_or_hive, int):
+            # Opening the base key from a hive constant — always succeeds so
+            # both HKLM and HKCU can be iterated.
+            return MagicMock(name="base_key")
+        # Opening a named subkey from a base-key handle.
+        for sk_name, val_name, install_dir in entries:
+            if sk_name == name:
+                h = MagicMock(name=f"subkey_{sk_name}")
+                h._val_name = val_name
+                h._install_dir = install_dir
+                return h
+        raise OSError(f"subkey {name!r} not found")
 
     def enum_key(key, index):
-        # Determine which hive this key belongs to
-        for hive, entries in subkeys_by_hive.items():
-            if index < len(entries):
-                return entries[index][0]
-        raise OSError("No more subkeys")
-
-    def open_subkey(key, subkey_name):
-        for hive, entries in subkeys_by_hive.items():
-            for name, values in entries:
-                if name == subkey_name:
-                    return MagicMock(name=f"subkey_{name}")
-        raise OSError("Subkey not found")
+        if index < len(entries):
+            return entries[index][0]
+        raise OSError("no more subkeys")
 
     def query_value(key, value_name):
-        # Find the matching subkey based on the mock key name
-        for hive, entries in subkeys_by_hive.items():
-            for name, values in entries:
-                if value_name in values:
-                    return (values[value_name], 1)  # (value, type)
-        raise OSError("Value not found")
+        expected = getattr(key, "_val_name", None)
+        if expected is not None and value_name == expected:
+            return (key._install_dir, 1)
+        raise OSError("value not found")
 
     mock_winreg.OpenKey = MagicMock(side_effect=open_key)
     mock_winreg.EnumKey = MagicMock(side_effect=enum_key)
@@ -108,3 +112,91 @@ class TestFindInstallationsFilesystem:
         # Count unique years
         years = [r["year"] for r in result]
         assert len(years) == len(set(years))
+
+
+class TestFindInstallationsRegistry:
+    """Test the Windows Registry discovery path."""
+
+    def _run_with_registry(self, entries, isdir=True, isfile_exe=True):
+        """Helper: run _find_revit_installations with a mocked winreg and fs."""
+        mock_winreg = _make_mock_winreg(entries)
+        install_dirs = {e[2] for e in entries}
+        exe_paths = {e[2].rstrip("/\\") + "/Revit.exe" for e in entries}
+
+        def _isdir(path):
+            return path in install_dirs if isdir is not True else True
+
+        def _isfile(path):
+            return any(path.replace("\\", "/") == e.replace("\\", "/") for e in exe_paths) if isfile_exe else False
+
+        with patch.dict(sys.modules, {"winreg": mock_winreg}):
+            with patch("tools.launch_tools.os.path.isdir", side_effect=_isdir):
+                with patch("tools.launch_tools.os.path.isfile", side_effect=_isfile):
+                    return _find_revit_installations()
+
+    def test_registry_finds_single_installation(self):
+        """Registry returns one Revit installation."""
+        entries = [("Autodesk Revit 2025", "InstallationLocation", "C:/Revit2025/")]
+        result = self._run_with_registry(entries)
+
+        assert len(result) == 1
+        assert result[0]["year"] == "2025"
+        assert result[0]["path"] == "C:/Revit2025/Revit.exe"
+
+    def test_registry_finds_multiple_versions_sorted(self):
+        """Multiple registry entries are returned newest-first."""
+        entries = [
+            ("Autodesk Revit 2024", "InstallationLocation", "C:/Revit2024/"),
+            ("Autodesk Revit 2026", "InstallationLocation", "C:/Revit2026/"),
+            ("Autodesk Revit 2025", "InstallationLocation", "C:/Revit2025/"),
+        ]
+        result = self._run_with_registry(entries)
+
+        years = [r["year"] for r in result]
+        assert years == ["2026", "2025", "2024"]
+
+    def test_registry_deduplicates_with_filesystem(self):
+        """A year found in the registry is not duplicated by the filesystem scan."""
+        entries = [("Autodesk Revit 2025", "InstallationLocation", "C:/Revit2025/")]
+        mock_winreg = _make_mock_winreg(entries)
+
+        # Filesystem also reports Revit 2025
+        def _isfile(path):
+            return "Revit.exe" in path
+
+        with patch.dict(sys.modules, {"winreg": mock_winreg}):
+            with patch("tools.launch_tools.os.path.isdir", return_value=True):
+                with patch("tools.launch_tools.os.path.isfile", side_effect=_isfile):
+                    result = _find_revit_installations()
+
+        years = [r["year"] for r in result]
+        assert years.count("2025") == 1
+
+    def test_registry_subkey_without_exe_is_skipped(self):
+        """A registry entry whose install dir has no Revit.exe is not returned."""
+        entries = [("Autodesk Revit 2025", "InstallationLocation", "C:/Revit2025/")]
+        mock_winreg = _make_mock_winreg(entries)
+
+        with patch.dict(sys.modules, {"winreg": mock_winreg}):
+            with patch("tools.launch_tools.os.path.isdir", return_value=True):
+                with patch("tools.launch_tools.os.path.isfile", return_value=False):
+                    result = _find_revit_installations()
+
+        assert result == []
+
+    def test_registry_hive_missing_falls_through_to_filesystem(self):
+        """When winreg raises on OpenKey, the filesystem fallback still works."""
+        mock_winreg = MagicMock()
+        mock_winreg.HKEY_LOCAL_MACHINE = 0x80000002
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+        mock_winreg.OpenKey.side_effect = OSError("key not found")
+
+        def _isfile(path):
+            return "Revit 2024" in path and path.endswith("Revit.exe")
+
+        with patch.dict(sys.modules, {"winreg": mock_winreg}):
+            with patch("tools.launch_tools.os.path.isfile", side_effect=_isfile):
+                result = _find_revit_installations()
+
+        assert len(result) == 1
+        assert result[0]["year"] == "2024"
