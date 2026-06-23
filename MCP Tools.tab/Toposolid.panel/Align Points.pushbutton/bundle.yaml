@@ -1,0 +1,8 @@
+title: Align Points
+tooltip: >
+  Snap selected Toposolid edit points that are within a tolerance of
+  selected detail/model lines onto those lines, in plan (X/Y) only.
+  Point elevation (Z) is never changed.
+
+
+  Select a Toposolid plus one or more lines, then run this tool.

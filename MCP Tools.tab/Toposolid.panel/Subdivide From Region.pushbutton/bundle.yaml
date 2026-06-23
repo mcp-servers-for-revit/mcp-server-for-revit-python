@@ -1,0 +1,8 @@
+title: Subdivide From Region
+tooltip: >
+  Create a Toposolid subdivision shaped by one or more Filled Region
+  boundaries.
+
+
+  Select a Toposolid plus one or more Filled Regions, then run this tool.
+  You'll be asked which Toposolid type to use for the new subdivision(s).

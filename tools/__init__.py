@@ -13,6 +13,8 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .code_execution_tools import register_code_execution_tools
     from .launch_tools import register_launch_tools
     from .document_tools import register_document_tools
+    from .topo_tools import register_topo_tools
+    from .grid_tools import register_grid_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -25,3 +27,5 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     )
     register_launch_tools(mcp_server, revit_get_func)
     register_document_tools(mcp_server, revit_get_func, revit_post_func)
+    register_topo_tools(mcp_server, revit_post_func)
+    register_grid_tools(mcp_server, revit_post_func)

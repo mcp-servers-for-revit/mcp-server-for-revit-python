@@ -1,0 +1,8 @@
+title: Crop Grids To View
+tooltip: >
+  Trim grid lines' view-specific extents so they stop exactly at the
+  active view's crop region boundary.
+
+
+  Select one or more grids first to only crop those, or run with nothing
+  selected to crop every grid visible in the active view.

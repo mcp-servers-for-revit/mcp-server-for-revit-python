@@ -45,6 +45,14 @@ def register_routes():
 
         register_document_routes(api)
 
+        from revit_mcp.topo_tools import register_topo_tools_routes
+
+        register_topo_tools_routes(api)
+
+        from revit_mcp.grid_tools import register_grid_tools_routes
+
+        register_grid_tools_routes(api)
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:
