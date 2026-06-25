@@ -17,7 +17,7 @@ mcp = FastMCP(
 )
 
 # Configuration
-REVIT_HOST = "localhost"
+REVIT_HOST = "127.0.0.1"
 REVIT_PORT = 48884  # Default pyRevit Routes port
 BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/revit_mcp"
 
