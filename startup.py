@@ -45,6 +45,10 @@ def register_routes():
 
         register_document_routes(api)
 
+        from revit_mcp.structure_framing import register_structure_framing_routes
+
+        register_structure_framing_routes(api)
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:
