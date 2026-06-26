@@ -49,6 +49,18 @@ def register_routes():
 
         register_structure_framing_routes(api)
 
+        from revit_mcp.ported_query import register_ported_query_routes
+
+        register_ported_query_routes(api)
+
+        from revit_mcp.ported_create import register_ported_create_routes
+
+        register_ported_create_routes(api)
+
+        from revit_mcp.ported_ops import register_ported_ops_routes
+
+        register_ported_ops_routes(api)
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:

@@ -403,4 +403,166 @@ def register_structure_framing_routes(api):
         except Exception as e:
             return routes.make_response(data={"error": str(e), "traceback": traceback.format_exc()}, status=500)
 
+    # ------------------------------------------------ KPFF shared-param setter
+    @api.route("/set_parameters_bulk/", methods=["POST"])
+    def set_parameters_bulk(doc, request):
+        """
+        Set parameters (incl. KPFF shared parameters) on many elements at once.
+        Body: {"elements": [{"id": 12345, "params": {"Generic Size": "W16x26",
+                                                       "Number of Studs": 20}}, ...]}
+        Coerces by storage type (String/Integer/Double/ElementId). Useful for
+        populating WF Wt / Framing / Joist Elevation Parameters etc. that drive KPFF tags.
+        """
+        try:
+            if not doc:
+                return routes.make_response(data={"error": "No active document"}, status=503)
+            data = _parse(request) or {}
+            elements = data.get("elements") or []
+            if not elements:
+                return routes.make_response(data={"error": "No 'elements' provided"}, status=400)
+            t = DB.Transaction(doc, "MCP Set Parameters")
+            t.Start()
+            results = []
+            try:
+                for spec in elements:
+                    e = doc.GetElement(DB.ElementId(int(spec["id"])))
+                    if not e:
+                        results.append({"id": spec.get("id"), "error": "not found"})
+                        continue
+                    set_ok = []
+                    failed = []
+                    for name, value in (spec.get("params") or {}).items():
+                        p = e.LookupParameter(name)
+                        if not p or p.IsReadOnly:
+                            failed.append(name)
+                            continue
+                        st = p.StorageType
+                        try:
+                            if st == DB.StorageType.String:
+                                p.Set(str(value))
+                            elif st == DB.StorageType.Integer:
+                                p.Set(int(value))
+                            elif st == DB.StorageType.Double:
+                                p.Set(float(value))
+                            elif st == DB.StorageType.ElementId:
+                                p.Set(DB.ElementId(int(value)))
+                            else:
+                                failed.append(name)
+                                continue
+                            set_ok.append(name)
+                        except Exception:
+                            failed.append(name)
+                    results.append({"id": element_id_value(e.Id), "set": set_ok, "failed": failed})
+                t.Commit()
+            except Exception as tx:
+                if t.HasStarted() and not t.HasEnded():
+                    t.RollBack()
+                raise tx
+            return routes.make_response(data={"status": "success", "results": results})
+        except Exception as e:
+            return routes.make_response(data={"error": str(e), "traceback": traceback.format_exc()}, status=500)
+
+    # ---------------------------------------- KPFF standard framing plan tagger
+    @api.route("/tag_framing_standard/", methods=["POST"])
+    def tag_framing_standard(doc, request):
+        """
+        Tag all framing in a view with the KPFF standard framing tag, oriented
+        parallel to each member (vertical text for N-S members, horizontal for E-W).
+        Body: {"view_name": "2 - Level 2",
+               "tag_family": "KPFF_Tag_Framing", "tag_type": "Standard - T/Elevation",
+               "level": "2nd Level"}
+        Default tag is the composite T/STL standard (Size [studs] C{camber} (drop) T/STL elev).
+        """
+        try:
+            if not doc:
+                return routes.make_response(data={"error": "No active document"}, status=503)
+            data = _parse(request) or {}
+            view = _view_by_name(doc, data.get("view_name"))
+            if not view:
+                return routes.make_response(data={"error": "view not found"}, status=404)
+            tag = find_family_symbol_safely(doc, data.get("tag_family", "KPFF_Tag_Framing"),
+                                            data.get("tag_type", "Standard - T/Elevation"))
+            if not tag:
+                return routes.make_response(data={"error": "framing tag type not found"}, status=404)
+            only_level = data.get("level")
+            framing = list(DB.FilteredElementCollector(doc)
+                           .OfCategory(DB.BuiltInCategory.OST_StructuralFraming)
+                           .WhereElementIsNotElementType())
+            t = DB.Transaction(doc, "MCP Tag Framing (KPFF standard)")
+            t.Start()
+            n = 0
+            try:
+                if not tag.IsActive:
+                    tag.Activate()
+                    doc.Regenerate()
+                for e in framing:
+                    if only_level:
+                        p = e.get_Parameter(DB.BuiltInParameter.INSTANCE_REFERENCE_LEVEL_PARAM)
+                        if not p or p.AsElementId().IntegerValue <= 0:
+                            continue
+                        if get_element_name(doc.GetElement(p.AsElementId())) != only_level:
+                            continue
+                    try:
+                        crv = e.Location.Curve
+                        a = crv.GetEndPoint(0)
+                        b = crv.GetEndPoint(1)
+                        m = crv.Evaluate(0.5, True)
+                        is_ns = abs(b.Y - a.Y) > abs(b.X - a.X)
+                        orient = DB.TagOrientation.Vertical if is_ns else DB.TagOrientation.Horizontal
+                        DB.IndependentTag.Create(doc, tag.Id, view.Id, DB.Reference(e),
+                                                 False, orient, DB.XYZ(m.X, m.Y, 0))
+                        n += 1
+                    except Exception:
+                        continue
+                t.Commit()
+            except Exception as tx:
+                if t.HasStarted() and not t.HasEnded():
+                    t.RollBack()
+                raise tx
+            return routes.make_response(data={"status": "success", "tagged": n})
+        except Exception as e:
+            return routes.make_response(data={"error": str(e), "traceback": traceback.format_exc()}, status=500)
+
+    # ---------------------------------------------- KPFF composite slab callout
+    @api.route("/create_slab_callout/", methods=["POST"])
+    def create_slab_callout(doc, request):
+        """
+        Place the KPFF composite-floor slab callout as a text note in a view.
+        Body: {"view_name": "2 - Level 2", "x": 60, "y": 50,
+               "t_slab": "17'-0\"", "nw_thickness": "3\"", "deck": "2VLI20",
+               "total_thickness": "5\"", "reinf": "#4@12\" OC", "text": "<override full text>"}
+        Default text matches: T/SLAB {t} / {nw} NORMAL-WEIGHT OVER {deck} GALV COMPOSITE
+        FLOOR DECK ({total} TOTAL THICKNESS) REINF w/ {reinf} (TYP-UNO).
+        """
+        try:
+            if not doc:
+                return routes.make_response(data={"error": "No active document"}, status=503)
+            d = _parse(request) or {}
+            view = _view_by_name(doc, d.get("view_name"))
+            if not view:
+                return routes.make_response(data={"error": "view not found"}, status=404)
+            text = d.get("text")
+            if not text:
+                text = ('T/SLAB %s\n%s NORMAL-WEIGHT OVER %s GALV COMPOSITE FLOOR DECK '
+                        '(%s TOTAL THICKNESS)\nREINF w/ %s (TYP-UNO)' % (
+                            d.get("t_slab", "0'-0\""), d.get("nw_thickness", "3\""),
+                            d.get("deck", "2VLI20"), d.get("total_thickness", "5\""),
+                            d.get("reinf", "#4@12\" OC")))
+            tnt = DB.FilteredElementCollector(doc).OfClass(DB.TextNoteType).FirstElement()
+            t = DB.Transaction(doc, "MCP Slab Callout")
+            t.Start()
+            try:
+                note = DB.TextNote.Create(doc, view.Id,
+                                          DB.XYZ(float(d.get("x", 0)), float(d.get("y", 0)), 0),
+                                          text, tnt.Id)
+                t.Commit()
+            except Exception as tx:
+                if t.HasStarted() and not t.HasEnded():
+                    t.RollBack()
+                raise tx
+            return routes.make_response(data={"status": "success",
+                                              "text_note_id": element_id_value(note.Id), "text": text})
+        except Exception as e:
+            return routes.make_response(data={"error": str(e), "traceback": traceback.format_exc()}, status=500)
+
     logger.info("Structural framing routes registered successfully")

@@ -113,3 +113,57 @@ def register_structure_tools(mcp, revit_get, revit_post):
             "view_name": view_name, "x": x, "y": y,
         }
         return format_response(await revit_post("/create_sheet/", data, ctx))
+
+    @mcp.tool()
+    async def set_parameters_bulk(
+        elements: List[Dict[str, Any]], ctx: Context = None
+    ) -> str:
+        """
+        Set parameters (including KPFF shared parameters) on many elements at once.
+        elements: [{"id": 12345, "params": {"Generic Size": "W16x26", "Number of Studs": 20}}, ...]
+        Drives KPFF tag/schedule data (WF Wt, Framing, Joist Elevation Parameters, etc.).
+        """
+        return format_response(await revit_post("/set_parameters_bulk/", {"elements": elements}, ctx))
+
+    @mcp.tool()
+    async def tag_framing_standard(
+        view_name: str,
+        tag_family: str = "KPFF_Tag_Framing",
+        tag_type: str = "Standard - T/Elevation",
+        level: str = None,
+        ctx: Context = None,
+    ) -> str:
+        """
+        Tag all framing in a view with the KPFF standard framing tag, oriented parallel to
+        each member (Size [studs] C{camber} (drop) T/STL {elev}). Optionally restrict to a level.
+        """
+        data = {"view_name": view_name, "tag_family": tag_family, "tag_type": tag_type}
+        if level:
+            data["level"] = level
+        return format_response(await revit_post("/tag_framing_standard/", data, ctx))
+
+    @mcp.tool()
+    async def create_slab_callout(
+        view_name: str,
+        x: float,
+        y: float,
+        t_slab: str = "0'-0\"",
+        nw_thickness: str = "3\"",
+        deck: str = "2VLI20",
+        total_thickness: str = "5\"",
+        reinf: str = "#4@12\" OC",
+        text: str = None,
+        ctx: Context = None,
+    ) -> str:
+        """
+        Place the KPFF composite-floor slab callout as a text note at (x,y) in a view.
+        Defaults match the KPFF standard: T/SLAB {t_slab} / {nw} NORMAL-WEIGHT OVER {deck}
+        GALV COMPOSITE FLOOR DECK ({total} TOTAL THICKNESS) REINF w/ {reinf} (TYP-UNO).
+        Pass `text` to fully override.
+        """
+        data = {"view_name": view_name, "x": x, "y": y, "t_slab": t_slab,
+                "nw_thickness": nw_thickness, "deck": deck,
+                "total_thickness": total_thickness, "reinf": reinf}
+        if text:
+            data["text"] = text
+        return format_response(await revit_post("/create_slab_callout/", data, ctx))
