@@ -18,6 +18,14 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .create_tools import register_create_tools
     from .ops_tools import register_ops_tools
     from .annotation_tools import register_annotation_tools
+    from .mep_tools import register_mep_tools
+    from .detail_tools import register_detail_tools
+    from .transform_tools import register_transform_tools
+    from .interop_tools import register_interop_tools
+    from .parameter_tools import register_parameter_tools
+    from .view_management_tools import register_view_management_tools
+    from .tag_tools import register_tag_tools
+    from .upstream_structure_tools import register_upstream_structure_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -35,3 +43,11 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_create_tools(mcp_server, revit_get_func, revit_post_func)
     register_ops_tools(mcp_server, revit_get_func, revit_post_func)
     register_annotation_tools(mcp_server, revit_get_func, revit_post_func)
+    register_mep_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
+    register_detail_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
+    register_transform_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
+    register_interop_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
+    register_parameter_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
+    register_view_management_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
+    register_tag_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
+    register_upstream_structure_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
