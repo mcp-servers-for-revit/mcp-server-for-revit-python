@@ -61,6 +61,10 @@ def register_routes():
 
         register_ported_ops_routes(api)
 
+        from revit_mcp.ported_annotation import register_ported_annotation_routes
+
+        register_ported_annotation_routes(api)
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:

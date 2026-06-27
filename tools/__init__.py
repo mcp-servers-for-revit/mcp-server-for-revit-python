@@ -17,6 +17,7 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .query_tools import register_query_tools
     from .create_tools import register_create_tools
     from .ops_tools import register_ops_tools
+    from .annotation_tools import register_annotation_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -33,3 +34,4 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_query_tools(mcp_server, revit_get_func, revit_post_func)
     register_create_tools(mcp_server, revit_get_func, revit_post_func)
     register_ops_tools(mcp_server, revit_get_func, revit_post_func)
+    register_annotation_tools(mcp_server, revit_get_func, revit_post_func)
