@@ -83,6 +83,9 @@ def register_routes():
         from revit_mcp.structure import register_structure_routes
         register_structure_routes(api)
 
+        from revit_mcp.shared_params import register_shared_param_routes
+        register_shared_param_routes(api)
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:
