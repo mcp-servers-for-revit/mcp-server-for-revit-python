@@ -92,6 +92,9 @@ def register_routes():
         from revit_mcp.detailing import register_detailing_routes
         register_detailing_routes(api)
 
+        from revit_mcp.rvt_extras import register_rvt_extras_routes
+        register_rvt_extras_routes(api)
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:

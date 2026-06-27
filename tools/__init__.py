@@ -29,6 +29,7 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .shared_param_tools import register_shared_param_tools
     from .geometry_tools import register_geometry_tools
     from .detailing_tools import register_detailing_tools
+    from .rvt_extras_tools import register_rvt_extras_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -57,3 +58,4 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_shared_param_tools(mcp_server, revit_get_func, revit_post_func)
     register_geometry_tools(mcp_server, revit_get_func, revit_post_func)
     register_detailing_tools(mcp_server, revit_get_func, revit_post_func)
+    register_rvt_extras_tools(mcp_server, revit_get_func, revit_post_func)
