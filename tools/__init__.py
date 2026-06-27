@@ -27,6 +27,8 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .tag_tools import register_tag_tools
     from .upstream_structure_tools import register_upstream_structure_tools
     from .shared_param_tools import register_shared_param_tools
+    from .geometry_tools import register_geometry_tools
+    from .detailing_tools import register_detailing_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -53,3 +55,5 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_tag_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
     register_upstream_structure_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
     register_shared_param_tools(mcp_server, revit_get_func, revit_post_func)
+    register_geometry_tools(mcp_server, revit_get_func, revit_post_func)
+    register_detailing_tools(mcp_server, revit_get_func, revit_post_func)
