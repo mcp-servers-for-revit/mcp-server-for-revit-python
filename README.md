@@ -437,4 +437,4 @@ This is a work in progress and more of a demonstration than a fully-featured pro
 ## Contributing
 
 Contributions are welcome! Feel free to submit pull requests or open issues for any bugs or feature requests.
-Feel free to reach out to me if you have any questions, ideas
+Feel free to reach out to me if you have any questions or ideas.
