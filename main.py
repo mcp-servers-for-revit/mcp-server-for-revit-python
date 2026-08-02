@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import sys
 import httpx
 import anyio
@@ -17,8 +18,10 @@ mcp = FastMCP(
 )
 
 # Configuration
-REVIT_HOST = "127.0.0.1"
-REVIT_PORT = 48884
+# Revit runs on Windows; when it lives in a VM the routes server is not on the
+# host loopback, so allow overriding the target via the environment.
+REVIT_HOST = os.environ.get("REVIT_HOST", "127.0.0.1")
+REVIT_PORT = int(os.environ.get("REVIT_PORT", "48884"))
 BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/revit_mcp"
 
 
