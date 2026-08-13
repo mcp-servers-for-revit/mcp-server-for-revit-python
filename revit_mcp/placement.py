@@ -4,7 +4,7 @@ Placement Module for Revit MCP
 Handles family placement and element creation functionality
 """
 
-from utils import get_element_name, find_family_symbol_safely, normalize_string, element_id_value
+from utils import get_element_name, find_family_symbol_safely, normalize_string, element_id_value, fix_request_string
 from pyrevit import routes, revit, DB
 import json
 import traceback
@@ -68,11 +68,16 @@ def register_placement_routes(api):
                 )
 
             # Extract required fields
-            family_name = data.get("family_name")
-            type_name = data.get("type_name")
+            # family_name/type_name/level_name are run through fix_request_string()
+            # because the Routes server mis-decodes non-ASCII request bodies (see
+            # fix_request_string's docstring) -- without it, any accented family,
+            # type, or level name silently fails to match against Revit's own
+            # (correctly decoded) element names.
+            family_name = fix_request_string(data.get("family_name"))
+            type_name = fix_request_string(data.get("type_name"))
             location = data.get("location", {})
             rotation = data.get("rotation", 0.0)
-            level_name = data.get("level_name")
+            level_name = fix_request_string(data.get("level_name"))
             properties = data.get("properties", {})
 
             # Basic validation

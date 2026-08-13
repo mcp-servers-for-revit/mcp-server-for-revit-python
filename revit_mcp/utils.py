@@ -35,6 +35,29 @@ def normalize_string(text):
         return u"Unnamed"
 
 
+def fix_request_string(value):
+    """Repair non-ASCII request strings mangled in transit by the Routes server.
+
+    Incoming JSON string values (e.g. family_name, type_name, level_name in
+    place_family) arrive as Python 2 `str` -- raw, *undecoded* UTF-8 bytes --
+    rather than `unicode`, e.g. "Nível" arrives as the 8 raw bytes that spell
+    "N\xc3\xadvel" instead of the single-codepoint unicode string u"N\xedvel".
+    ASCII-only values are unaffected (ASCII bytes are valid UTF-8 already,
+    and comparing str/unicode of pure-ASCII content works fine), which is
+    why this only shows up for accented/non-ASCII names when compared
+    against real Revit element names (always proper unicode from the API).
+
+    Decoding those raw bytes as UTF-8 recovers the intended text. Falls
+    back to the original value if it isn't a `str`, or isn't valid UTF-8.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        return value.decode("utf-8")
+    except UnicodeDecodeError:
+        return value
+
+
 def element_id_value(element_id):
     """Get the integer value from an ElementId.
 
