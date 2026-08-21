@@ -12,3 +12,6 @@ wheels/
 *TODO.md
 .env
 CLAUDE.md
+
+# Generate Layout pushbutton's last-entered program (per-user runtime state)
+MCP Tools.tab/Layout.panel/Generate Layout.pushbutton/last_program.json
