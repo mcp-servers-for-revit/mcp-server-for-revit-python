@@ -45,6 +45,10 @@ def register_routes():
 
         register_document_routes(api)
 
+        from revit_mcp.text_to_plan import register_text_to_plan_routes
+
+        register_text_to_plan_routes(api)
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:

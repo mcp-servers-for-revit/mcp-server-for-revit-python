@@ -8,6 +8,7 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .status_tools import register_status_tools
     from .view_tools import register_view_tools
     from .family_tools import register_family_tools
+    from .text_to_plan_tools import register_text_to_plan_tools
     from .model_tools import register_model_tools
     from .colors_tools import register_colors_tools
     from .code_execution_tools import register_code_execution_tools
@@ -18,6 +19,7 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     register_status_tools(mcp_server, revit_get_func)
     register_view_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func)
     register_family_tools(mcp_server, revit_get_func, revit_post_func)
+    register_text_to_plan_tools(mcp_server, revit_get_func, revit_post_func)
     register_model_tools(mcp_server, revit_get_func)
     register_colors_tools(mcp_server, revit_get_func, revit_post_func)
     register_code_execution_tools(
