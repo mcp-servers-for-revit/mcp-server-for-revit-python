@@ -18,7 +18,7 @@ def register_model_info_routes(api):
     """Register all model information routes with the API"""
 
     @api.route("/model_info/", methods=["GET"])
-    def get_model_info():
+    def get_model_info(doc):
         """
         Get comprehensive information about the current Revit model
 
@@ -31,7 +31,6 @@ def register_model_info_routes(api):
         - Link status
         """
         try:
-            doc = revit.doc
             if not doc:
                 return routes.make_response(
                     data={"error": "No active Revit document"}, status=503
