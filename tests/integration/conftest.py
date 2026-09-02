@@ -4,7 +4,7 @@ import os
 import pytest
 import httpx
 
-BASE_URL = "http://localhost:48884/revit_mcp"
+BASE_URL = "http://127.0.0.1:48884/revit_mcp"
 TEST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test.rvt")
 
 
