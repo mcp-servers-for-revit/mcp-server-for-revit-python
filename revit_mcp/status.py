@@ -21,8 +21,13 @@ def register_status_routes(api):
             dict: Health status with Revit document information
         """
         try:
-            from pyrevit import revit
-            
+            from pyrevit import revit, HOST_APP
+
+            try:
+                revit_version = HOST_APP.pretty_name
+            except Exception:
+                revit_version = None
+
             doc = revit.doc
             if doc:
                 return routes.make_response(data={
@@ -30,13 +35,15 @@ def register_status_routes(api):
                     "health": "healthy",
                     "revit_available": True,
                     "document_title": doc.Title if doc.Title else "Untitled",
+                    "revit_version": revit_version,
                     "api_name": "revit_mcp"
                 })
             else:
                 return routes.make_response(data={
-                    "status": "unhealthy", 
+                    "status": "unhealthy",
                     "revit_available": False,
                     "error": "No active Revit document",
+                    "revit_version": revit_version,
                     "api_name": "revit_mcp"
                 }, status=503)
                 
