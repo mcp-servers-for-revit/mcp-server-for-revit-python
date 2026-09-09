@@ -97,6 +97,8 @@ They never conflict because they serve different roles, speak different protocol
 | `close_document` | ✅ Implemented | Launch & Document | Close the active document |
 | `save_document` | ✅ Implemented | Launch & Document | Save or Save As the active document |
 | `sync_with_central` | ✅ Implemented | Launch & Document | Synchronize a workshared document with central |
+| `list_revit_instances` | ✅ Implemented | Status & Connectivity | List running Revit instances and their Routes ports |
+| `select_revit_instance` | ✅ Implemented | Status & Connectivity | Pin the server to a specific Revit instance's port |
 | `get_selected_elements` | 🔄 Pending | Selection Management | Get information about currently selected elements |
 | `create_line_based_element` | 🔄 Pending | Element Creation | Create line-based elements (walls, beams, pipes) |
 | `create_surface_based_element` | 🔄 Pending | Element Creation | Create surface-based elements (floors, ceilings) |
@@ -127,6 +129,8 @@ They never conflict because they serve different roles, speak different protocol
 2. Open Settings
 3. Go to `Routes` > activate `Routes Server`
 pyRevit will start listening on port `http://localhost:48884/`
+
+> **Note on multiple Revit instances:** pyRevit assigns Routes ports per Revit instance in launch order (`48884`, `48885`, ...). The MCP server automatically scans this range and connects to the first instance it finds, rediscovering the port if the connection goes stale. When several instances are running (e.g. Revit 2024 and 2025 side by side), use the `list_revit_instances` tool to see them and `select_revit_instance` to choose one. To pin a port permanently, set the `REVIT_PORT` environment variable (see also `REVIT_HOST`, `REVIT_PORT_SCAN_START`, `REVIT_PORT_SCAN_COUNT`).
 
 ### Install from pyRevit:
 
