@@ -97,6 +97,7 @@ They never conflict because they serve different roles, speak different protocol
 | `close_document` | ✅ Implemented | Launch & Document | Close the active document |
 | `save_document` | ✅ Implemented | Launch & Document | Save or Save As the active document |
 | `sync_with_central` | ✅ Implemented | Launch & Document | Synchronize a workshared document with central |
+| `generate_formwork` | ✅ Implemented | Structural Automation | Generate structural formwork (encofrado) geometry and quantity takeoff for columns, beams, slabs, walls and foundations, avoiding double counting on contact faces |
 | `get_selected_elements` | 🔄 Pending | Selection Management | Get information about currently selected elements |
 | `create_line_based_element` | 🔄 Pending | Element Creation | Create line-based elements (walls, beams, pipes) |
 | `create_surface_based_element` | 🔄 Pending | Element Creation | Create surface-based elements (floors, ceilings) |
