@@ -47,6 +47,18 @@ def element_id_value(element_id):
         return int(element_id.IntegerValue)
 
 
+def element_id_from_value(value):
+    """Build an ElementId from a plain integer.
+
+    DB.ElementId(int(value)) is ambiguous on newer Revit APIs (2027+
+    added ElementId(BuiltInParameter) / ElementId(BuiltInCategory)
+    overloads, and IronPython can't pick between those and the int/long
+    one for a bare Python int) - Revit raises 'Multiple targets could
+    match'. long() forces the unambiguous Int64 overload.
+    """
+    return DB.ElementId(long(value))
+
+
 def get_element_name(element):
     """
     Get the name of a Revit element.

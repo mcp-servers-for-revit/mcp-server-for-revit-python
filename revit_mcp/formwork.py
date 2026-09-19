@@ -11,7 +11,7 @@ import json
 import traceback
 import logging
 
-from utils import element_id_value
+from utils import element_id_value, element_id_from_value
 import formwork_geometry as fw_geom
 import formwork_params as fw_params
 
@@ -47,7 +47,7 @@ def _resolve_by_selection(doc, element_ids, category_keys, material_filters):
 
     for raw_id in element_ids:
         try:
-            elem = doc.GetElement(DB.ElementId(int(raw_id)))
+            elem = doc.GetElement(element_id_from_value(raw_id))
         except Exception:
             elem = None
         if not elem or not elem.Category:

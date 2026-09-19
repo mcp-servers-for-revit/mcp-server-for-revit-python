@@ -8,7 +8,12 @@ from pyrevit import routes, DB
 import json
 import logging
 
-from utils import element_id_value, get_element_name, normalize_string
+from utils import (
+    element_id_value,
+    element_id_from_value,
+    get_element_name,
+    normalize_string,
+)
 import creation_tracker
 
 logger = logging.getLogger(__name__)
@@ -54,7 +59,7 @@ def register_element_management_routes(api):
                 for raw_id in element_ids:
                     try:
                         int_id = int(raw_id)
-                        eid = DB.ElementId(int_id)
+                        eid = element_id_from_value(int_id)
                         elem = doc.GetElement(eid)
                         if elem is None:
                             not_found.append(int_id)
@@ -126,7 +131,7 @@ def register_element_management_routes(api):
                     data={"error": "No properties provided"}, status=400
                 )
 
-            elem = doc.GetElement(DB.ElementId(int(element_id)))
+            elem = doc.GetElement(element_id_from_value(element_id))
             if elem is None:
                 return routes.make_response(
                     data={"error": "Element not found: {}".format(element_id)},
@@ -160,7 +165,7 @@ def register_element_management_routes(api):
                         elif param.StorageType == DB.StorageType.Double:
                             param.Set(float(param_value))
                         elif param.StorageType == DB.StorageType.ElementId:
-                            param.Set(DB.ElementId(int(param_value)))
+                            param.Set(element_id_from_value(param_value))
                         else:
                             properties_failed.append(
                                 "{} (unsupported type)".format(param_name)
@@ -233,7 +238,7 @@ def register_element_management_routes(api):
             valid_ids = []
             for raw_id in tracked_ids:
                 try:
-                    eid = DB.ElementId(int(raw_id))
+                    eid = element_id_from_value(raw_id)
                     elem = doc.GetElement(eid)
                     if elem is None:
                         continue
@@ -269,7 +274,7 @@ def register_element_management_routes(api):
             try:
                 for raw_id in valid_ids:
                     try:
-                        doc.Delete(DB.ElementId(int(raw_id)))
+                        doc.Delete(element_id_from_value(raw_id))
                         deleted.append(raw_id)
                     except Exception as del_err:
                         logger.warning(
