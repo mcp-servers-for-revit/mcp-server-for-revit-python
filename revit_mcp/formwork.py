@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 MM_TO_FT = 1.0 / 304.8
 
 
-def _resolve_by_category(doc, category_keys, material_filter):
+def _resolve_by_category(doc, category_keys, material_filters):
     elements_by_category = {}
     for key in category_keys:
         cat_info = fw_geom.CATEGORY_MAP.get(key)
@@ -31,6 +31,7 @@ def _resolve_by_category(doc, category_keys, material_filter):
             .OfCategory(cat_info["bic"])
             .WhereElementIsNotElementType()
         )
+        material_filter = material_filters.get(key, "")
         matched = [
             el
             for el in collector
@@ -40,7 +41,7 @@ def _resolve_by_category(doc, category_keys, material_filter):
     return elements_by_category
 
 
-def _resolve_by_selection(doc, element_ids, category_keys, material_filter):
+def _resolve_by_selection(doc, element_ids, category_keys, material_filters):
     elements_by_category = {}
     skipped = []
 
@@ -68,7 +69,7 @@ def _resolve_by_selection(doc, element_ids, category_keys, material_filter):
         if not key or (category_keys and key not in category_keys):
             skipped.append(raw_id)
             continue
-        if not fw_geom.element_matches_material(elem, material_filter):
+        if not fw_geom.element_matches_material(elem, material_filters.get(key, "")):
             continue
 
         elements_by_category.setdefault(key, []).append(elem)
@@ -90,13 +91,16 @@ def register_formwork_routes(api):
             "scope": "model" | "selection",
             "element_ids": [123, 456],              # required if scope == "selection"
             "categories": ["columns","beams","slabs","walls","foundations"],
-            "material_filter": "concreto",
+            "material_filter": "concreto",              # default, all categories
+            "material_filters": {                        # optional per-category override
+                "beams": "f'c=210",
+                "columns": "f'c=280"
+            },
             "panel_thickness_mm": 18,
             "contact_tolerance_mm": 5,
             "exclude_top_faces": true,
             "exclude_foundation_bottom": true,
             "create_geometry": true,
-            "write_quantities": true,
             "dry_run": false
         }
         """
@@ -142,9 +146,34 @@ def register_formwork_routes(api):
                 )
 
             material_filter = data.get("material_filter", "")
+            material_filters_input = data.get("material_filters") or {}
+            if not isinstance(material_filters_input, dict):
+                return routes.make_response(
+                    data={
+                        "error": "material_filters debe ser un objeto {categoria: filtro}"
+                    },
+                    status=400,
+                )
+            invalid_filter_categories = [
+                c for c in material_filters_input if c not in fw_geom.CATEGORY_MAP
+            ]
+            if invalid_filter_categories:
+                return routes.make_response(
+                    data={
+                        "error": "Categorias invalidas en material_filters: {}".format(
+                            ", ".join(invalid_filter_categories)
+                        ),
+                        "valid_categories": list(fw_geom.CATEGORY_MAP.keys()),
+                    },
+                    status=400,
+                )
+            material_filters = {
+                key: material_filters_input.get(key, material_filter)
+                for key in requested_categories
+            }
+
             dry_run = bool(data.get("dry_run", False))
             create_geometry = bool(data.get("create_geometry", True)) and not dry_run
-            write_quantities = bool(data.get("write_quantities", True)) and not dry_run
 
             config = {
                 "panel_thickness_ft": float(data.get("panel_thickness_mm", 18.0)) * MM_TO_FT,
@@ -154,7 +183,6 @@ def register_formwork_routes(api):
                     data.get("exclude_foundation_bottom", True)
                 ),
                 "create_geometry": create_geometry,
-                "write_quantities": write_quantities,
             }
 
             skipped_ids = []
@@ -166,11 +194,11 @@ def register_formwork_routes(api):
                         status=400,
                     )
                 elements_by_category, skipped_ids = _resolve_by_selection(
-                    doc, element_ids, requested_categories, material_filter
+                    doc, element_ids, requested_categories, material_filters
                 )
             elif scope == "model":
                 elements_by_category = _resolve_by_category(
-                    doc, requested_categories, material_filter
+                    doc, requested_categories, material_filters
                 )
             else:
                 return routes.make_response(
@@ -200,7 +228,7 @@ def register_formwork_routes(api):
                 t = DB.Transaction(doc, "Generar Encofrado via MCP")
                 t.Start()
                 try:
-                    if write_quantities:
+                    if create_geometry:
                         warnings.extend(fw_params.ensure_shared_parameters(doc))
                     report = fw_geom.process_formwork(
                         doc, elements_by_category, config, warnings

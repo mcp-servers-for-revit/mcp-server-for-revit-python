@@ -32,9 +32,9 @@ class TestFormworkTools:
         assert call_data["exclude_top_faces"] is True
         assert call_data["exclude_foundation_bottom"] is True
         assert call_data["create_geometry"] is True
-        assert call_data["write_quantities"] is True
         assert call_data["dry_run"] is False
         assert "categories" not in call_data
+        assert "material_filters" not in call_data
         assert "element_ids" not in call_data
         assert kwargs["timeout"] == 120.0
 
@@ -59,3 +59,17 @@ class TestFormworkTools:
         call_data = mock_revit_post.call_args[0][1]
         assert call_data["scope"] == "selection"
         assert call_data["element_ids"] == [111, 222]
+
+    async def test_generate_formwork_per_category_material_filters(
+        self, mock_mcp, mock_revit_post
+    ):
+        tools = self._setup(mock_mcp, mock_revit_post)
+        await tools["generate_formwork"](
+            material_filters={"beams": "f'c=210", "columns": "f'c=280"},
+            ctx=None,
+        )
+        call_data = mock_revit_post.call_args[0][1]
+        assert call_data["material_filters"] == {
+            "beams": "f'c=210",
+            "columns": "f'c=280",
+        }

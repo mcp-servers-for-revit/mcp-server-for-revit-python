@@ -53,13 +53,22 @@ if not mode:
 
 dry_run = mode.startswith("Vista previa")
 
-material_filter = forms.ask_for_string(
-    default="",
-    prompt="Filtro de material (opcional, ej. 'concreto'). Vacio = sin filtro.",
-    title="Encofrado",
-)
-if material_filter is None:
-    script.exit()
+# Filtro de material independiente por categoria (ej. distinto f'c para
+# vigas y columnas), en vez de un unico filtro para todo.
+material_filters = {}
+for label, key in CATEGORY_LABELS:
+    if key not in selected_keys:
+        continue
+    value = forms.ask_for_string(
+        default="",
+        prompt="Filtro de material para {} (opcional, ej. 'concreto'). Vacio = sin filtro.".format(
+            label
+        ),
+        title="Encofrado - Material",
+    )
+    if value is None:
+        script.exit()
+    material_filters[key] = value
 
 
 def collect(bic):
@@ -78,7 +87,7 @@ for key in selected_keys:
     elements_by_category[key] = [
         el
         for el in all_elements
-        if fw_geom.element_matches_material(el, material_filter)
+        if fw_geom.element_matches_material(el, material_filters.get(key, ""))
     ]
 
 total_candidates = sum(len(v) for v in elements_by_category.values())
@@ -94,7 +103,6 @@ config = {
     "exclude_top_faces": True,
     "exclude_foundation_bottom": True,
     "create_geometry": not dry_run,
-    "write_quantities": not dry_run,
 }
 
 warnings = []

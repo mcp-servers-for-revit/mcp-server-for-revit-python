@@ -2,7 +2,7 @@
 """Formwork (encofrado) automation tools"""
 
 from mcp.server.fastmcp import Context
-from typing import List, Optional
+from typing import Dict, List, Optional
 from .utils import format_response
 
 
@@ -15,12 +15,12 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         element_ids: Optional[List[int]] = None,
         categories: Optional[List[str]] = None,
         material_filter: str = "",
+        material_filters: Optional[Dict[str, str]] = None,
         panel_thickness_mm: float = 18.0,
         contact_tolerance_mm: float = 5.0,
         exclude_top_faces: bool = True,
         exclude_foundation_bottom: bool = True,
         create_geometry: bool = True,
-        write_quantities: bool = True,
         dry_run: bool = False,
         ctx: Context = None,
     ) -> str:
@@ -35,10 +35,19 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         default.
 
         Use dry_run=True to get a quantity/area report without creating any
-        geometry or writing any parameters, to preview before committing.
+        geometry, to preview before committing. Quantity takeoff is always
+        returned in the report; build a native Revit schedule off the
+        created panels' EF_Area_m2 / EF_Categoria_Origen parameters if you
+        need a table in the model.
 
         `categories` accepts any of: "foundations", "walls", "columns",
         "beams", "slabs" (default: all of them).
+
+        material_filter is the default material substring filter (matched
+        against structural material, type name or family name) applied to
+        every category. Use material_filters to set an independent filter
+        per category, e.g. {"beams": "f'c=210", "columns": "f'c=280"} —
+        any category not listed there falls back to material_filter.
 
         Set scope="selection" and pass `element_ids` to restrict the run to
         specific elements instead of the whole model.
@@ -51,11 +60,12 @@ def register_formwork_tools(mcp, revit_get, revit_post):
             "exclude_top_faces": exclude_top_faces,
             "exclude_foundation_bottom": exclude_foundation_bottom,
             "create_geometry": create_geometry,
-            "write_quantities": write_quantities,
             "dry_run": dry_run,
         }
         if categories:
             data["categories"] = categories
+        if material_filters:
+            data["material_filters"] = material_filters
         if element_ids:
             data["element_ids"] = element_ids
 

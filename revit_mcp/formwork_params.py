@@ -16,20 +16,10 @@ GROUP_NAME = "Encofrado"
 SHARED_PARAM_FILE_NAME = "EncofradoSharedParams.txt"
 
 # name -> (is_text, [BuiltInCategory,...])
-INSTANCE_QUANTITY_PARAM = "EF_Area_Encofrado_m2"
-
 PANEL_PARAMS = [
     ("EF_Elemento_Origen_Id", True),
     ("EF_Categoria_Origen", True),
     ("EF_Area_m2", False),
-]
-
-STRUCTURAL_CATEGORIES = [
-    DB.BuiltInCategory.OST_StructuralFoundation,
-    DB.BuiltInCategory.OST_Walls,
-    DB.BuiltInCategory.OST_StructuralColumns,
-    DB.BuiltInCategory.OST_StructuralFraming,
-    DB.BuiltInCategory.OST_Floors,
 ]
 
 PANEL_CATEGORIES = [DB.BuiltInCategory.OST_GenericModel]
@@ -107,9 +97,10 @@ def _ensure_binding(doc, definition, built_in_categories, is_instance=True):
 
 
 def ensure_shared_parameters(doc):
-    """Make sure every formwork parameter exists and is bound to the
-    right categories. Must be called inside an active Transaction.
-    Returns a list of human-readable warnings (empty on full success)."""
+    """Make sure every formwork panel parameter exists and is bound to
+    the Generic Models category. Must be called inside an active
+    Transaction. Returns a list of human-readable warnings (empty on
+    full success)."""
 
     warnings = []
     app = doc.Application
@@ -134,16 +125,6 @@ def ensure_shared_parameters(doc):
         return warnings
 
     group = _get_or_create_group(def_file)
-
-    try:
-        definition = _get_or_create_definition(group, INSTANCE_QUANTITY_PARAM, is_text=False)
-        _ensure_binding(doc, definition, STRUCTURAL_CATEGORIES, is_instance=True)
-    except Exception as e:
-        warnings.append(
-            "No se pudo crear/enlazar el parametro {}: {}".format(
-                INSTANCE_QUANTITY_PARAM, str(e)
-            )
-        )
 
     for name, is_text in PANEL_PARAMS:
         try:
