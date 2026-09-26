@@ -18,9 +18,16 @@ from utils import normalize_string, element_id_value
 from formwork_spatial import (
     PlaneFrame,
     SpatialHash,
+    axis_lines,
     bbox_to_tuple,
+    box_corners,
+    box_uv_range,
     boxes_overlap,
     candidate_cells,
+    drop_collinear_points,
+    edge_outward_normals,
+    offset_polygon,
+    split_polygon_edges,
 )
 
 FT2_TO_M2 = 0.09290304  # square feet -> square meters
@@ -308,15 +315,6 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
     u_steps = max(1, min(MAX_GRID_STEPS, int(round((u1 - u0) * u_len / grid_ft))))
     v_steps = max(1, min(MAX_GRID_STEPS, int(round((v1 - v0) * v_len / grid_ft))))
 
-    du = (u1 - u0) / u_steps
-    dv = (v1 - v0) / v_steps
-    cell_area_ft2 = du * u_len * dv * v_len
-
-    # Pass 1 — probe only the cells that lie inside some neighbor's
-    # bounding box. Probing is the expensive part (a Revit solid/curve
-    # intersection per cell and neighbor solid), and on a real model most
-    # of a face is nowhere near any neighbor, or the neighbor only grazes
-    # one edge of it (a slab sitting on a wall, a wall meeting another).
     o = deriv.Origin
     frame = PlaneFrame(
         (o.X, o.Y, o.Z),
@@ -325,22 +323,48 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
         mid_uv.U,
         mid_uv.V,
     )
+
+    # Grid lines also pass through every neighbor's projected box edges,
+    # so a contact boundary (e.g. the slab soffit along a beam side) is
+    # cut exactly there instead of being rounded to the nearest cell.
+    u_breaks = []
+    v_breaks = []
+    for n in neighbors:
+        if n.bbox is None:
+            continue
+        nu0, nu1, nv0, nv1 = box_uv_range(frame, n.bbox)
+        u_breaks.extend((nu0, nu1))
+        v_breaks.extend((nv0, nv1))
+    u_lines = axis_lines(u0, u1, u_steps, u_breaks)
+    v_lines = axis_lines(v0, v1, v_steps, v_breaks)
+    u_steps = len(u_lines) - 1
+    v_steps = len(v_lines) - 1
+
+    def _cell_center(i, j):
+        return DB.UV(
+            (u_lines[i] + u_lines[i + 1]) / 2.0, (v_lines[j] + v_lines[j + 1]) / 2.0
+        )
+
+    def _cell_area_ft2(i, j):
+        return (u_lines[i + 1] - u_lines[i]) * u_len * (v_lines[j + 1] - v_lines[j]) * v_len
+
+    # Pass 1 — probe only the cells that lie inside some neighbor's
+    # bounding box. Probing is the expensive part (a Revit solid/curve
+    # intersection per cell and neighbor solid), and on a real model most
+    # of a face is nowhere near any neighbor, or the neighbor only grazes
+    # one edge of it (a slab sitting on a wall, a wall meeting another).
     nearby = candidate_cells(
         frame,
         [n.bbox for n in neighbors],
         # Same reach as the probe segment in `_point_probes_into_solid`.
         max(tol_ft * 2.0, 0.001),
-        u0,
-        du,
-        u_steps,
-        v0,
-        dv,
-        v_steps,
+        u_lines,
+        v_lines,
     )
 
     contact = set()
     for (i, j), neighbor_idxs in nearby.items():
-        uv = DB.UV(u0 + (i + 0.5) * du, v0 + (j + 0.5) * dv)
+        uv = _cell_center(i, j)
         try:
             if not face.IsInside(uv):
                 continue
@@ -358,14 +382,12 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
     # Pass 2 — only faces with real contact pay for the full grid, which
     # is needed to carve the free region into panel rectangles.
     grid = [[False for _ in range(u_steps)] for _ in range(v_steps)]
-    contact_cells = len(contact)
     for j in range(v_steps):
-        v_mid = v0 + (j + 0.5) * dv
         for i in range(u_steps):
             if (i, j) in contact:
                 continue
             try:
-                grid[j][i] = face.IsInside(DB.UV(u0 + (i + 0.5) * du, v_mid))
+                grid[j][i] = face.IsInside(_cell_center(i, j))
             except Exception:
                 continue
 
@@ -401,10 +423,10 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
     included_specs = []
     included_area_m2 = 0.0
     for i_start, i_end, j_start, j_end in rectangles:
-        u_a = u0 + i_start * du
-        u_b = u0 + i_end * du
-        v_a = v0 + j_start * dv
-        v_b = v0 + j_end * dv
+        u_a = u_lines[i_start]
+        u_b = u_lines[i_end]
+        v_a = v_lines[j_start]
+        v_b = v_lines[j_end]
         try:
             p00 = face.Evaluate(DB.UV(u_a, v_a))
             p10 = face.Evaluate(DB.UV(u_b, v_a))
@@ -424,13 +446,266 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
         )
         included_area_m2 += area_m2
 
-    contact_area_m2 = cell_area_ft2 * contact_cells * FT2_TO_M2
+    contact_area_m2 = sum(_cell_area_ft2(i, j) for i, j in contact) * FT2_TO_M2
 
     return {
         "included_faces": included_specs,
         "included_area_m2": included_area_m2,
         "contact_area_m2": contact_area_m2,
     }
+
+
+VERTICAL_NORMAL_Z = 0.1  # |normal.Z| below this = vertical face
+JOINT_EPS_FT = 0.01  # ~3 mm step past a panel edge to sample what lies there
+JOINT_LIFT_FT = 0.05  # ~1.5 cm above a soffit edge, to sample the side face zone
+POINT_PROBE_FT = 0.003
+
+
+def _point_in_solids(point, solids):
+    """Is `point` inside any of `solids`? (a tiny vertical segment through
+    it intersecting the solid)."""
+    d = DB.XYZ(0, 0, POINT_PROBE_FT)
+    try:
+        line = DB.Line.CreateBound(point.Subtract(d), point.Add(d))
+    except Exception:
+        return False
+    opts = DB.SolidCurveIntersectionOptions()
+    for solid in solids:
+        try:
+            result = solid.IntersectWithCurve(line, opts)
+            if result is not None and result.SegmentCount > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _signed_area_2d(pts):
+    s = 0.0
+    n = len(pts)
+    for k in range(n):
+        x1, y1 = pts[k]
+        x2, y2 = pts[(k + 1) % n]
+        s += x1 * y2 - x2 * y1
+    return s / 2.0
+
+
+def _own_face_width(candidate, normal, point):
+    """Horizontal width of `candidate`'s vertical planar face with outward
+    `normal` whose plane passes through `point`, or None."""
+    cache = candidate.__dict__.setdefault("_face_widths", [])
+    if not cache:
+        for solid in candidate.get_solids():
+            for face in solid.Faces:
+                if not isinstance(face, DB.PlanarFace):
+                    continue
+                n = face.FaceNormal
+                if abs(n.Z) >= VERTICAL_NORMAL_Z:
+                    continue
+                box = _face_world_bbox(face)
+                if box is None:
+                    continue
+                h = DB.XYZ(-n.Y, n.X, 0).Normalize()
+                spans = [
+                    x * h.X + y * h.Y
+                    for x in (box[0], box[3])
+                    for y in (box[1], box[4])
+                ]
+                cache.append((n, face.Origin, max(spans) - min(spans)))
+    for n, origin, width in cache:
+        if n.DotProduct(normal) > 0.99 and abs(point.Subtract(origin).DotProduct(n)) < 0.01:
+            return width
+    return None
+
+
+def _joint_offset(mid, out, normal, candidate, neighbors, t, is_vertical):
+    """Offset for one panel edge segment (see `adjust_panel_joints`):
+    +t extends the panel past the edge, -t pulls it back, 0 leaves it."""
+    own_seq = CATEGORY_MAP[candidate.category_key]["sequence"]
+    own = candidate.get_solids()
+    up = DB.XYZ(0, 0, 1)
+
+    def in_any_neighbor(point, accept=None):
+        for n in neighbors:
+            if accept is not None and not accept(n):
+                continue
+            if _point_in_solids(point, n.get_solids()):
+                return True
+        return False
+
+    if is_vertical:
+        panel_zone = mid.Add(out.Multiply(JOINT_EPS_FT)).Add(normal.Multiply(t / 2.0))
+        if out.Z > 0.9:
+            # Top edge under a soffit: the slab soffit panel is continuous,
+            # so the vertical panel stops under it. A beam soffit only wins
+            # over elements poured after or with it (columns and walls keep
+            # running up to the beam).
+            if in_any_neighbor(
+                panel_zone,
+                lambda n: n.category_key == "slabs"
+                or (
+                    n.category_key == "beams"
+                    and own_seq >= CATEGORY_MAP["beams"]["sequence"]
+                ),
+            ):
+                return -t
+            return 0.0
+        if abs(out.Z) >= VERTICAL_NORMAL_Z:
+            return 0.0
+        # Side edge running into an element poured earlier (a beam or
+        # wall reaching a column): that element's panel is continuous,
+        # this one stops at its outer face.
+        if in_any_neighbor(
+            panel_zone,
+            lambda n: CATEGORY_MAP[n.category_key]["sequence"] < own_seq,
+        ):
+            return -t
+        # Outside corner with another face of this same element: the
+        # wider face's panel laps over the narrower one's edge.
+        if _point_in_solids(
+            mid.Add(out.Multiply(JOINT_EPS_FT)).Subtract(normal.Multiply(JOINT_EPS_FT)),
+            own,
+        ):
+            return 0.0  # not an outside corner (internal or concave edge)
+        side_zone = mid.Add(out.Multiply(t / 2.0)).Subtract(normal.Multiply(JOINT_LIFT_FT))
+        if _point_in_solids(side_zone, own) or in_any_neighbor(side_zone):
+            return 0.0  # the other face has no panel here
+        width_here = _own_face_width(candidate, normal, mid)
+        width_other = _own_face_width(candidate, out, mid)
+        if width_here is None or width_other is None:
+            return 0.0
+        if width_here > width_other + 1e-3 or (
+            abs(width_here - width_other) <= 1e-3 and abs(normal.X) >= abs(normal.Y)
+        ):
+            return t
+        return 0.0
+
+    # Soffit (beam/slab bottom), horizontal edge.
+    if abs(out.Z) >= VERTICAL_NORMAL_Z:
+        return 0.0
+    beside = mid.Add(out.Multiply(t / 2.0)).Add(up.Multiply(JOINT_LIFT_FT))
+    if not _point_in_solids(beside, own) and not in_any_neighbor(beside):
+        return t  # a side panel stands here: reach its outer face
+    if candidate.category_key == "beams":
+        below = mid.Add(out.Multiply(JOINT_EPS_FT)).Subtract(up.Multiply(t / 2.0))
+        if in_any_neighbor(
+            below, lambda n: CATEGORY_MAP[n.category_key]["sequence"] < own_seq
+        ):
+            return -t  # beam bottom stops at the column/wall panel face
+    return 0.0
+
+
+def adjust_panel_joints(face_spec, candidate, neighbors, thickness_ft):
+    """Shape a panel so it meets its neighbors like real formwork, without
+    changing its takeoff area (`area_m2` stays the concrete contact area):
+
+    - Soffit panels (beam/slab bottoms) extend by the panel thickness past
+      every edge where a side panel stands, so they reach the side
+      panel's outer face.
+    - Vertical panels stop one panel thickness below a slab soffit (and
+      below a beam soffit, for beams/slabs) so they end under that
+      soffit's panel instead of overlapping it.
+    - Panels of an element poured earlier (per CATEGORY_MAP "sequence":
+      a column before the beams framing into it) run continuous; the
+      later element's side and bottom panels stop at their outer face.
+    - At an outside corner of one element, the wider face's panel laps
+      over the narrower face's panel edge.
+
+    Every edge is split where neighbor boundaries cross it, so a rule
+    applies only along the stretch where it holds. Returns the original
+    spec when nothing applies or the loop can't be rebuilt (non-line
+    edges, strip thinner than a trim)."""
+    normal = face_spec["direction"]
+    is_vertical = abs(normal.Z) < VERTICAL_NORMAL_Z
+    is_soffit = (
+        normal.Z < BOTTOM_NORMAL_Z
+        and not CATEGORY_MAP[candidate.category_key]["rests_on_ground"]
+    )
+    if not (is_vertical or is_soffit):
+        return face_spec
+
+    loops = list(face_spec["loops"])
+    if not loops:
+        return face_spec
+
+    # Orthonormal 2D frame on the face plane.
+    try:
+        first = [c for c in loops[0]][0]
+        origin = first.GetEndPoint(0)
+        ex = first.GetEndPoint(1).Subtract(origin).Normalize()
+        ey = normal.CrossProduct(ex).Normalize()
+    except Exception:
+        return face_spec
+
+    def to2d(p):
+        d = p.Subtract(origin)
+        return (d.DotProduct(ex), d.DotProduct(ey))
+
+    def to3d(q):
+        return origin.Add(ex.Multiply(q[0])).Add(ey.Multiply(q[1]))
+
+    polys = []
+    for loop in loops:
+        pts = []
+        for curve in loop:
+            if not isinstance(curve, DB.Line):
+                return face_spec
+            pts.append(to2d(curve.GetEndPoint(0)))
+        polys.append(pts)
+
+    neighbor_corners = [
+        [to2d(DB.XYZ(c[0], c[1], c[2])) for c in box_corners(n.bbox)]
+        for n in neighbors
+        if n.bbox is not None
+    ]
+
+    new_polys = []
+    changed = False
+    for pts in polys:
+        split = split_polygon_edges(pts, neighbor_corners)
+        normals = edge_outward_normals(split, polys)
+        offsets = []
+        for k in range(len(split)):
+            a = split[k]
+            b = split[(k + 1) % len(split)]
+            mid = to3d(((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0))
+            out = ex.Multiply(normals[k][0]).Add(ey.Multiply(normals[k][1]))
+            offsets.append(
+                _joint_offset(
+                    mid, out, normal, candidate, neighbors, thickness_ft, is_vertical
+                )
+            )
+
+        if any(offsets):
+            new_pts = offset_polygon(split, normals, offsets)
+            old_area = _signed_area_2d(pts)
+            new_area = _signed_area_2d(new_pts)
+            if old_area * new_area <= 0 or abs(new_area) < 1e-4:
+                return face_spec  # a trim would collapse the panel
+            new_polys.append(new_pts)
+            changed = True
+        else:
+            new_polys.append(pts)
+
+    if not changed:
+        return face_spec
+
+    try:
+        new_loops = []
+        for pts in new_polys:
+            pts = drop_collinear_points(pts)
+            loop = DB.CurveLoop()
+            for k in range(len(pts)):
+                loop.Append(
+                    DB.Line.CreateBound(to3d(pts[k]), to3d(pts[(k + 1) % len(pts)]))
+                )
+            new_loops.append(loop)
+    except Exception:
+        return face_spec
+
+    adjusted = dict(face_spec)
+    adjusted["loops"] = List[DB.CurveLoop](new_loops)
+    return adjusted
 
 
 def classify_element_faces(candidate, neighbors, config, warnings):
@@ -711,6 +986,12 @@ def process_formwork(
             formwork_material_id = material_id_cache[formwork_material]
 
             for face_spec in classification["included_faces"]:
+                try:
+                    face_spec = adjust_panel_joints(
+                        face_spec, candidate, neighbors, config["panel_thickness_ft"]
+                    )
+                except Exception:
+                    pass  # keep the plain face-shaped panel
                 try:
                     create_formwork_panel(
                         doc,

@@ -8,6 +8,7 @@ IronPython 2 engine and under CPython for unit tests. Boxes are plain
 are 3-tuples, which keeps the hot loops free of .NET interop calls.
 """
 
+import bisect
 import math
 
 
@@ -135,38 +136,183 @@ def _dot(a, b):
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
-def cell_index_range(lo, hi, origin, step, count):
-    """Inclusive index range of grid cells [origin + i*step, +step) that
-    intersect [lo, hi], clamped to [0, count-1]; None if disjoint."""
-    if hi < origin or lo > origin + step * count:
+def box_uv_range(frame, box, tol=0.0):
+    """(u_min, u_max, v_min, v_max) of a box projected onto a face plane."""
+    uvs = [frame.project(c) for c in box_corners(box, tol)]
+    return (
+        min(p[0] for p in uvs),
+        max(p[0] for p in uvs),
+        min(p[1] for p in uvs),
+        max(p[1] for p in uvs),
+    )
+
+
+def axis_lines(lo, hi, steps, breaks=(), eps=1e-4):
+    """Sorted grid lines over [lo, hi]: `steps` uniform divisions plus any
+    `breaks` falling strictly inside, so cell edges land exactly on
+    neighbor boundaries instead of being rounded to the uniform grid.
+    Lines closer than `eps` are merged (endpoints always kept)."""
+    raw = [lo + (hi - lo) * k / float(steps) for k in range(1, steps)]
+    raw.extend(b for b in breaks if lo + eps < b < hi - eps)
+    raw.sort()
+    lines = [lo]
+    for x in raw:
+        if x - lines[-1] > eps:
+            lines.append(x)
+    if hi - lines[-1] <= eps:
+        lines[-1] = hi
+    else:
+        lines.append(hi)
+    return lines
+
+
+def cell_index_range(lo, hi, lines):
+    """Inclusive index range of the cells [lines[k], lines[k+1]] that
+    intersect [lo, hi]; None if disjoint."""
+    count = len(lines) - 1
+    if count < 1 or hi < lines[0] or lo > lines[-1]:
         return None
-    i_lo = max(0, int(math.floor((lo - origin) / step)))
-    i_hi = min(count - 1, int(math.floor((hi - origin) / step)))
+    i_lo = max(0, bisect.bisect_right(lines, lo) - 1)
+    i_hi = min(count - 1, bisect.bisect_left(lines, hi) - 1)
     if i_hi < i_lo:
-        return None
-    return (i_lo, i_hi)
+        i_hi = i_lo
+    return (min(i_lo, count - 1), i_hi)
 
 
-def candidate_cells(frame, boxes, tol, u0, du, u_steps, v0, dv, v_steps):
+def candidate_cells(frame, boxes, tol, u_lines, v_lines):
     """Grid cells of a face that could possibly touch any of `boxes`:
     {(i, j): [box indices]}. Cells whose centre is not inside a box
     (expanded by `tol`) are dropped, so a neighbor that only grazes the
     face along an edge contributes nothing."""
     cells = {}
     for idx, box in enumerate(boxes):
-        uvs = [frame.project(c) for c in box_corners(box, tol)]
-        i_range = cell_index_range(
-            min(p[0] for p in uvs), max(p[0] for p in uvs), u0, du, u_steps
-        )
-        j_range = cell_index_range(
-            min(p[1] for p in uvs), max(p[1] for p in uvs), v0, dv, v_steps
-        )
+        u_min, u_max, v_min, v_max = box_uv_range(frame, box, tol)
+        i_range = cell_index_range(u_min, u_max, u_lines)
+        j_range = cell_index_range(v_min, v_max, v_lines)
         if i_range is None or j_range is None:
             continue
         for j in range(j_range[0], j_range[1] + 1):
-            v_mid = v0 + (j + 0.5) * dv
+            v_mid = (v_lines[j] + v_lines[j + 1]) / 2.0
             for i in range(i_range[0], i_range[1] + 1):
-                u_mid = u0 + (i + 0.5) * du
+                u_mid = (u_lines[i] + u_lines[i + 1]) / 2.0
                 if point_in_box(frame.point(u_mid, v_mid), box, tol):
                     cells.setdefault((i, j), []).append(idx)
     return cells
+
+
+def point_in_polygons(pt, polygons):
+    """Even-odd test against several 2D polygons (outer loop + holes)."""
+    x, y = pt
+    inside = False
+    for poly in polygons:
+        n = len(poly)
+        for k in range(n):
+            x1, y1 = poly[k]
+            x2, y2 = poly[(k + 1) % n]
+            if (y1 > y) != (y2 > y):
+                if x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                    inside = not inside
+    return inside
+
+
+def edge_outward_normals(polygon, polygons, eps=1e-3):
+    """Unit 2D normal per edge of `polygon` pointing away from the region
+    described by `polygons` (even-odd), so it works for holes too."""
+    normals = []
+    n = len(polygon)
+    for k in range(n):
+        x1, y1 = polygon[k]
+        x2, y2 = polygon[(k + 1) % n]
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 1e-12:
+            normals.append((0.0, 0.0))
+            continue
+        left = (-dy / length, dx / length)
+        mid = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+        probe = (mid[0] + left[0] * eps, mid[1] + left[1] * eps)
+        if point_in_polygons(probe, polygons):
+            normals.append((-left[0], -left[1]))
+        else:
+            normals.append(left)
+    return normals
+
+
+def split_polygon_edges(polygon, obstacles, eps=1e-3):
+    """Insert extra vertices along each edge wherever an obstacle's 2D
+    extent (given as its corner points) starts or ends along that edge,
+    so per-edge rules can differ along one straight edge."""
+    result = []
+    n = len(polygon)
+    for k in range(n):
+        a = polygon[k]
+        b = polygon[(k + 1) % n]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length = math.hypot(dx, dy)
+        result.append(a)
+        if length < 2 * eps:
+            continue
+        ux, uy = dx / length, dy / length
+        cuts = set()
+        for corners in obstacles:
+            s_vals = [(c[0] - a[0]) * ux + (c[1] - a[1]) * uy for c in corners]
+            for s in (min(s_vals), max(s_vals)):
+                if eps < s < length - eps:
+                    cuts.add(round(s, 6))
+        for s in sorted(cuts):
+            result.append((a[0] + ux * s, a[1] + uy * s))
+    return result
+
+
+def drop_collinear_points(polygon, eps=1e-9):
+    """Remove vertices lying on a straight line between their neighbors
+    (and duplicates), keeping the polygon's shape and orientation."""
+    pts = []
+    for p in polygon:
+        if not pts or math.hypot(p[0] - pts[-1][0], p[1] - pts[-1][1]) > 1e-7:
+            pts.append(p)
+    if len(pts) > 1 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= 1e-7:
+        pts.pop()
+    changed = True
+    while changed and len(pts) > 3:
+        changed = False
+        for k in range(len(pts)):
+            a = pts[k - 1]
+            b = pts[k]
+            c = pts[(k + 1) % len(pts)]
+            cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+            if abs(cross) <= eps * max(1.0, math.hypot(c[0] - a[0], c[1] - a[1])):
+                pts.pop(k)
+                changed = True
+                break
+    return pts
+
+
+def offset_polygon(polygon, normals, offsets):
+    """Move each edge k of `polygon` by offsets[k] along normals[k]
+    (positive = outward) and rebuild the corners from the shifted edge
+    lines. Vertex order, and so orientation, is preserved; collinear
+    neighbors with different offsets get a small step."""
+    n = len(polygon)
+    result = []
+    for k in range(n):
+        prev = (k - 1) % n
+        pa = polygon[prev]
+        pb = polygon[k]
+        pc = polygon[(k + 1) % n]
+        na, oa = normals[prev], offsets[prev]
+        nb, ob = normals[k], offsets[k]
+        d1 = (pb[0] - pa[0], pb[1] - pa[1])
+        d2 = (pc[0] - pb[0], pc[1] - pb[1])
+        p1 = (pb[0] + na[0] * oa, pb[1] + na[1] * oa)
+        p2 = (pb[0] + nb[0] * ob, pb[1] + nb[1] * ob)
+        cross = d1[0] * d2[1] - d1[1] * d2[0]
+        if abs(cross) < 1e-9 * (math.hypot(*d1) * math.hypot(*d2) + 1e-12):
+            result.append(p1)
+            if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > 1e-9:
+                result.append(p2)
+            continue
+        w = (p2[0] - p1[0], p2[1] - p1[1])
+        a = (w[0] * d2[1] - w[1] * d2[0]) / cross
+        result.append((p1[0] + d1[0] * a, p1[1] + d1[1] * a))
+    return result

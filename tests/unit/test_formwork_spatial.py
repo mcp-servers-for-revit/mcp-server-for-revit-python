@@ -5,9 +5,13 @@ import pytest
 from revit_mcp.formwork_spatial import (
     PlaneFrame,
     SpatialHash,
+    axis_lines,
     boxes_overlap,
     candidate_cells,
     cell_index_range,
+    edge_outward_normals,
+    offset_polygon,
+    point_in_polygons,
 )
 
 TOL = 0.016  # ~5 mm in feet
@@ -67,33 +71,122 @@ class TestPlaneFrame:
         assert frame.project(p) == pytest.approx((1.5, -0.5))
 
 
+class TestAxisLines:
+    def test_uniform(self):
+        assert axis_lines(0.0, 1.0, 4) == pytest.approx([0, 0.25, 0.5, 0.75, 1.0])
+
+    def test_breaks_inserted_and_deduped(self):
+        lines = axis_lines(0.0, 1.0, 4, [0.6, 0.25000001, -1, 2])
+        assert lines == pytest.approx([0, 0.25, 0.5, 0.6, 0.75, 1.0])
+
+
 class TestCellIndexRange:
+    lines = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+
     def test_inside(self):
-        assert cell_index_range(1.2, 2.7, 0.0, 0.5, 10) == (2, 5)
+        assert cell_index_range(1.2, 2.7, self.lines) == (2, 5)
 
     def test_clamped(self):
-        assert cell_index_range(-3, 30, 0.0, 0.5, 10) == (0, 9)
+        assert cell_index_range(-3, 30, self.lines) == (0, 5)
 
     def test_disjoint(self):
-        assert cell_index_range(6, 7, 0.0, 0.5, 10) is None
+        assert cell_index_range(6, 7, self.lines) is None
 
 
 class TestCandidateCells:
     # 4 ft x 10 ft column side face in the XZ plane (y = 0), u = X, v = Z.
     frame = PlaneFrame((2.0, 0.0, 5.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), 2.0, 5.0)
-    grid = dict(u0=0.0, du=0.25, u_steps=16, v0=0.0, dv=0.25, v_steps=40)
+    u_lines = axis_lines(0.0, 4.0, 16)
+    v_lines = axis_lines(0.0, 10.0, 40)
 
     def test_beam_framing_in_covers_only_its_patch(self):
         beam = box(1.0, -6.0, 8.0, 3.0, 0.0, 10.0)  # 2 ft wide, top 2 ft of face
-        cells = candidate_cells(self.frame, [beam], TOL, **self.grid)
+        cells = candidate_cells(self.frame, [beam], TOL, self.u_lines, self.v_lines)
         assert len(cells) == 8 * 8
         assert all(4 <= i < 12 and 32 <= j < 40 for i, j in cells)
 
     def test_edge_graze_contributes_nothing(self):
         # Slab whose box only touches the face's top edge (z = 10).
         slab = box(-5.0, -5.0, 10.0, 9.0, 5.0, 10.7)
-        assert candidate_cells(self.frame, [slab], TOL, **self.grid) == {}
+        assert candidate_cells(self.frame, [slab], TOL, self.u_lines, self.v_lines) == {}
 
     def test_far_neighbor(self):
         far = box(50, 50, 0, 51, 51, 10)
-        assert candidate_cells(self.frame, [far], TOL, **self.grid) == {}
+        assert candidate_cells(self.frame, [far], TOL, self.u_lines, self.v_lines) == {}
+
+    def test_break_lines_make_contact_band_exact(self):
+        # Slab 0.656 ft thick against the top of the face: with the slab
+        # soffit as a break line the contact band is exactly its thickness.
+        slab = box(-5.0, 0.0, 9.344, 9.0, 5.0, 10.0)
+        v_lines = axis_lines(0.0, 10.0, 40, [9.344])
+        cells = candidate_cells(self.frame, [slab], TOL, self.u_lines, v_lines)
+        rows = sorted({j for _, j in cells})
+        band = v_lines[rows[-1] + 1] - v_lines[rows[0]]
+        assert band == pytest.approx(0.656)
+
+
+SQUARE = [(0.0, 0.0), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)]  # CCW
+
+
+class TestPolygons:
+    def test_point_in_polygons_with_hole(self):
+        hole = [(0.5, 0.25), (0.5, 0.75), (1.5, 0.75), (1.5, 0.25)]
+        assert point_in_polygons((0.2, 0.5), [SQUARE, hole])
+        assert not point_in_polygons((1.0, 0.5), [SQUARE, hole])
+
+    def test_outward_normals_ccw_and_cw(self):
+        expected = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+        assert edge_outward_normals(SQUARE, [SQUARE]) == [pytest.approx(n) for n in expected]
+        cw = list(reversed(SQUARE))
+        normals = edge_outward_normals(cw, [cw])
+        assert normals[0] == pytest.approx((0, 1))  # top edge (0,1)->(2,1)
+
+    def test_outward_normals_of_hole_point_into_hole(self):
+        hole = [(0.5, 0.25), (1.5, 0.25), (1.5, 0.75), (0.5, 0.75)]
+        normals = edge_outward_normals(hole, [SQUARE, hole])
+        assert normals[0] == pytest.approx((0, 1))  # bottom edge of hole -> up into void
+
+    def test_offset_extend_two_sides(self):
+        normals = edge_outward_normals(SQUARE, [SQUARE])
+        out = offset_polygon(SQUARE, normals, [0.1, 0.0, 0.1, 0.0])
+        assert out == [pytest.approx(p) for p in [(0, -0.1), (2, -0.1), (2, 1.1), (0, 1.1)]]
+
+    def test_offset_trim_top(self):
+        normals = edge_outward_normals(SQUARE, [SQUARE])
+        out = offset_polygon(SQUARE, normals, [0.0, 0.0, -0.06, 0.0])
+        assert out == [pytest.approx(p) for p in [(0, 0), (2, 0), (2, 0.94), (0, 0.94)]]
+
+    def test_offset_collinear_step(self):
+        poly = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)]
+        normals = edge_outward_normals(poly, [poly])
+        out = offset_polygon(poly, normals, [0.1, 0.0, 0.0, 0.0, 0.0])
+        assert (1.0, -0.1) in [pytest.approx(p) for p in out]
+        assert len(out) == 6
+
+
+class TestEdgeSplitting:
+    def test_split_at_obstacle_extent(self):
+        from revit_mcp.formwork_spatial import split_polygon_edges
+
+        # Obstacle spanning x in [0.5, 1.2] above the square's top edge.
+        obstacle = [(0.5, 1.0), (1.2, 1.0), (0.5, 2.0), (1.2, 2.0)]
+        out = split_polygon_edges(SQUARE, [obstacle])
+        # bottom edge (0,0)->(2,0) and top edge (2,1)->(0,1) both get the cuts
+        assert (1.2, 1.0) in [pytest.approx(p) for p in out]
+        assert (0.5, 0.0) in [pytest.approx(p) for p in out]
+        assert len(out) == 8
+
+    def test_partial_trim_makes_step(self):
+        from revit_mcp.formwork_spatial import drop_collinear_points, split_polygon_edges
+
+        obstacle = [(0.5, 1.0), (1.2, 1.0), (0.5, 2.0), (1.2, 2.0)]
+        split = split_polygon_edges(SQUARE, [obstacle])
+        normals = edge_outward_normals(split, [split])
+        # trim only the top stretch under the obstacle (edge (1.2,1)->(0.5,1))
+        offsets = [0.0] * len(split)
+        k = [i for i, p in enumerate(split) if p == pytest.approx((1.2, 1.0))][0]
+        offsets[k] = -0.06
+        out = drop_collinear_points(offset_polygon(split, normals, offsets))
+        assert len(out) == 8  # notch: 4 corners + 4 step points
+        assert (1.2, 0.94) in [pytest.approx(p) for p in out]
+        assert (0.5, 0.94) in [pytest.approx(p) for p in out]
