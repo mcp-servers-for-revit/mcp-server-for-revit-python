@@ -15,6 +15,13 @@ clr.AddReference("System")
 from System.Collections.Generic import List
 
 from utils import normalize_string, element_id_value
+from formwork_spatial import (
+    PlaneFrame,
+    SpatialHash,
+    bbox_to_tuple,
+    boxes_overlap,
+    candidate_cells,
+)
 
 FT2_TO_M2 = 0.09290304  # square feet -> square meters
 TOP_NORMAL_Z = 0.98  # cos(~11.5deg) — treat near-vertical-up normals as "top"
@@ -26,6 +33,9 @@ BOTTOM_NORMAL_Z = -0.98
 # beam/column interfaces without an excessive cell count.
 DEFAULT_CONTACT_GRID_FT = 0.25
 MAX_GRID_STEPS = 80  # cap per axis so a huge face can't blow up runtime
+# XY bucket size for the neighbor lookup (~5 m): big enough that most
+# elements land in 1-4 buckets, small enough to keep buckets short.
+NEIGHBOR_HASH_CELL_FT = 16.0
 
 # Category catalogue: request key -> Revit category + default construction
 # sequence priority (lower = poured earlier) + whether it rests on
@@ -135,7 +145,9 @@ class _Candidate(object):
     def __init__(self, element, category_key, bbox):
         self.element = element
         self.category_key = category_key
-        self.bbox = bbox
+        # Plain-float box tuple: comparing tuples avoids .NET interop in
+        # the neighbor/face filters, which run a very large number of times.
+        self.bbox = bbox_to_tuple(bbox)
         self.solids = None  # lazy
 
     def get_solids(self):
@@ -144,33 +156,10 @@ class _Candidate(object):
         return self.solids
 
 
-def _bbox_overlaps(bbox_a, bbox_b, tol_ft):
-    if bbox_a is None or bbox_b is None:
-        return False
-    return (
-        bbox_a.Min.X - tol_ft <= bbox_b.Max.X
-        and bbox_a.Max.X + tol_ft >= bbox_b.Min.X
-        and bbox_a.Min.Y - tol_ft <= bbox_b.Max.Y
-        and bbox_a.Max.Y + tol_ft >= bbox_b.Min.Y
-        and bbox_a.Min.Z - tol_ft <= bbox_b.Max.Z
-        and bbox_a.Max.Z + tol_ft >= bbox_b.Min.Z
-    )
-
-
-class _MinMaxBox(object):
-    """Lightweight stand-in for a BoundingBoxXYZ (just .Min/.Max XYZ),
-    used to run a face's own bounding box through `_bbox_overlaps`."""
-
-    __slots__ = ("Min", "Max")
-
-    def __init__(self, min_pt, max_pt):
-        self.Min = min_pt
-        self.Max = max_pt
-
-
 def _face_world_bbox(face):
-    """Approximate world-space bounding box of a face, built from its
-    triangulated mesh (works for any loop shape, holes included)."""
+    """Approximate world-space bounding box of a face as a box tuple,
+    built from its triangulated mesh (works for any loop shape, holes
+    included)."""
     try:
         mesh = face.Triangulate()
     except Exception:
@@ -199,7 +188,7 @@ def _face_world_bbox(face):
 
     if min_x is None:
         return None
-    return _MinMaxBox(DB.XYZ(min_x, min_y, min_z), DB.XYZ(max_x, max_y, max_z))
+    return (min_x, min_y, min_z, max_x, max_y, max_z)
 
 
 def _filter_touching_neighbors(face, neighbors, tol_ft):
@@ -212,7 +201,7 @@ def _filter_touching_neighbors(face, neighbors, tol_ft):
     return [
         n
         for n in neighbors
-        if n.bbox is not None and _bbox_overlaps(face_bbox, n.bbox, tol_ft)
+        if n.bbox is not None and boxes_overlap(face_bbox, n.bbox, tol_ft)
     ]
 
 
@@ -290,7 +279,8 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
     why the rest of this module avoids them.
 
     Returns a dict with `included_faces` (panel specs, possibly several
-    per face), `included_area_m2` and `contact_area_m2`, or None if the
+    per face), `included_area_m2` and `contact_area_m2`; `{"no_contact":
+    True}` when no neighbor actually touches the face; or None if the
     face's parametrization couldn't be read (caller falls back to the
     single-sample whole-face check).
     """
@@ -322,30 +312,62 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
     dv = (v1 - v0) / v_steps
     cell_area_ft2 = du * u_len * dv * v_len
 
-    grid = [[False for _ in range(u_steps)] for _ in range(v_steps)]
-    contact_cells = 0
-    evaluated_cells = 0
+    # Pass 1 — probe only the cells that lie inside some neighbor's
+    # bounding box. Probing is the expensive part (a Revit solid/curve
+    # intersection per cell and neighbor solid), and on a real model most
+    # of a face is nowhere near any neighbor, or the neighbor only grazes
+    # one edge of it (a slab sitting on a wall, a wall meeting another).
+    o = deriv.Origin
+    frame = PlaneFrame(
+        (o.X, o.Y, o.Z),
+        (deriv.BasisX.X, deriv.BasisX.Y, deriv.BasisX.Z),
+        (deriv.BasisY.X, deriv.BasisY.Y, deriv.BasisY.Z),
+        mid_uv.U,
+        mid_uv.V,
+    )
+    nearby = candidate_cells(
+        frame,
+        [n.bbox for n in neighbors],
+        # Same reach as the probe segment in `_point_probes_into_solid`.
+        max(tol_ft * 2.0, 0.001),
+        u0,
+        du,
+        u_steps,
+        v0,
+        dv,
+        v_steps,
+    )
 
+    contact = set()
+    for (i, j), neighbor_idxs in nearby.items():
+        uv = DB.UV(u0 + (i + 0.5) * du, v0 + (j + 0.5) * dv)
+        try:
+            if not face.IsInside(uv):
+                continue
+            point = face.Evaluate(uv)
+        except Exception:
+            continue
+        if _has_contact(point, normal, tol_ft, [neighbors[k] for k in neighbor_idxs]):
+            contact.add((i, j))
+
+    if not contact:
+        # Nothing actually touches this face: the caller keeps the whole
+        # face with its exact edge loops, no grid needed.
+        return {"no_contact": True}
+
+    # Pass 2 — only faces with real contact pay for the full grid, which
+    # is needed to carve the free region into panel rectangles.
+    grid = [[False for _ in range(u_steps)] for _ in range(v_steps)]
+    contact_cells = len(contact)
     for j in range(v_steps):
         v_mid = v0 + (j + 0.5) * dv
         for i in range(u_steps):
-            u_mid = u0 + (i + 0.5) * du
-            uv = DB.UV(u_mid, v_mid)
+            if (i, j) in contact:
+                continue
             try:
-                if not face.IsInside(uv):
-                    continue
-                point = face.Evaluate(uv)
+                grid[j][i] = face.IsInside(DB.UV(u0 + (i + 0.5) * du, v_mid))
             except Exception:
                 continue
-
-            evaluated_cells += 1
-            if _has_contact(point, normal, tol_ft, neighbors):
-                contact_cells += 1
-            else:
-                grid[j][i] = True
-
-    if evaluated_cells == 0:
-        return None
 
     # Merge contiguous included cells into rectangles: runs of True
     # within a row, then merge runs across vertically-adjacent rows that
@@ -466,7 +488,9 @@ def classify_element_faces(candidate, neighbors, config, warnings):
                         )
                     )
 
-                if partition is not None:
+                if partition is not None and partition.get("no_contact"):
+                    pass  # nothing touches it: whole-face path below
+                elif partition is not None:
                     included_faces.extend(partition["included_faces"])
                     area_included += partition["included_area_m2"]
                     if is_bottom:
@@ -474,20 +498,20 @@ def classify_element_faces(candidate, neighbors, config, warnings):
                     else:
                         area_contact += partition["contact_area_m2"]
                     continue
-
-                # Partition couldn't be computed (unusual face
-                # parametrization) — fall back to the previous
-                # whole-face single-sample check rather than dropping it.
-                sample_point = _face_sample_point(face)
-                if sample_point is None:
-                    skipped_curved += 1
-                    continue
-                if _has_contact(sample_point, normal, tol_ft, touching):
-                    if is_bottom:
-                        area_bottom_excluded += area_m2
-                    else:
-                        area_contact += area_m2
-                    continue
+                else:
+                    # Partition couldn't be computed (unusual face
+                    # parametrization) — fall back to the previous
+                    # whole-face single-sample check rather than dropping it.
+                    sample_point = _face_sample_point(face)
+                    if sample_point is None:
+                        skipped_curved += 1
+                        continue
+                    if _has_contact(sample_point, normal, tol_ft, touching):
+                        if is_bottom:
+                            area_bottom_excluded += area_m2
+                        else:
+                            area_contact += area_m2
+                        continue
 
             try:
                 loops = List[DB.CurveLoop](face.GetEdgesAsCurveLoops())
@@ -654,12 +678,15 @@ def process_formwork(
     panels_created = 0
     material_id_cache = {}
 
+    neighbor_hash = SpatialHash(NEIGHBOR_HASH_CELL_FT)
+    for idx, other in enumerate(neighbor_pool):
+        neighbor_hash.insert(idx, other.bbox)
+
     for candidate in candidates:
         neighbors = [
-            other
-            for other in neighbor_pool
-            if other is not candidate
-            and _bbox_overlaps(candidate.bbox, other.bbox, tol_ft)
+            neighbor_pool[idx]
+            for idx in neighbor_hash.query(candidate.bbox, tol_ft)
+            if neighbor_pool[idx] is not candidate
         ]
 
         solids = candidate.get_solids()
