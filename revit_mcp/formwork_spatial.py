@@ -52,6 +52,28 @@ def box_corners(box, tol=0.0):
     return [(x, y, z) for x in xs for y in ys for z in zs]
 
 
+def ray_box_2d(origin, direction, box, tol=0.0):
+    """Distance along a 2D ray (plan view) to where it enters `box`
+    (expanded by `tol`), 0 if it starts inside, None if it misses."""
+    t_min, t_max = 0.0, float("inf")
+    for axis, lo, hi in ((0, box[0] - tol, box[3] + tol), (1, box[1] - tol, box[4] + tol)):
+        o = origin[axis]
+        d = direction[axis]
+        if abs(d) < 1e-12:
+            if o < lo or o > hi:
+                return None
+            continue
+        t1 = (lo - o) / d
+        t2 = (hi - o) / d
+        if t1 > t2:
+            t1, t2 = t2, t1
+        t_min = max(t_min, t1)
+        t_max = min(t_max, t2)
+        if t_min > t_max:
+            return None
+    return t_min
+
+
 class SpatialHash(object):
     """Uniform XY grid of box indices, so neighbor lookup is ~O(n)
     instead of comparing every element against every other one."""
@@ -74,6 +96,34 @@ class SpatialHash(object):
         for ix in self._range(box[0], box[3]):
             for iy in self._range(box[1], box[4]):
                 self.cells.setdefault((ix, iy), []).append(key)
+
+    def query_ray(self, origin, direction, length, z, tol=0.0):
+        """Keys whose box is crossed by the horizontal ray from `origin`
+        (x, y) along unit `direction` (dx, dy) for `length`, at height
+        `z`. Returns (distance, key) pairs sorted by distance."""
+        seen = set()
+        hits = []
+        step = self.cell_size / 4.0
+        n_steps = int(length / step) + 2
+        for k in range(n_steps):
+            x = origin[0] + direction[0] * step * k
+            y = origin[1] + direction[1] * step * k
+            cell = (
+                int(math.floor(x / self.cell_size)),
+                int(math.floor(y / self.cell_size)),
+            )
+            for key in self.cells.get(cell, ()):
+                if key in seen:
+                    continue
+                seen.add(key)
+                box = self.boxes[key]
+                if not (box[2] - tol <= z <= box[5] + tol):
+                    continue
+                d = ray_box_2d(origin, direction, box, tol)
+                if d is not None and d <= length:
+                    hits.append((d, key))
+        hits.sort(key=lambda h: h[0])
+        return hits
 
     def query(self, box, tol):
         """Keys whose box overlaps `box` (expanded by `tol`)."""

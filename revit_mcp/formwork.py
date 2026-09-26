@@ -80,6 +80,20 @@ def _resolve_by_selection(doc, element_ids, category_keys):
     return elements_by_category, skipped
 
 
+def _ground_elevation_ft(doc, data):
+    """Ground level for "poured against soil": `ground_level_name` (a
+    level name), else `ground_level_m` (internal elevation in meters),
+    else the model's "NTN" level."""
+    name = data.get("ground_level_name")
+    if name:
+        for level in DB.FilteredElementCollector(doc).OfClass(DB.Level):
+            if getattr(level, "Name", None) == name:
+                return level.ProjectElevation
+    if data.get("ground_level_m") is not None:
+        return float(data["ground_level_m"]) / 0.3048
+    return fw_geom.find_ground_elevation_ft(doc)
+
+
 def register_formwork_routes(api):
     """Register formwork generation routes with the API"""
 
@@ -103,6 +117,8 @@ def register_formwork_routes(api):
             "contact_tolerance_mm": 5,
             "exclude_top_faces": true,
             "exclude_foundation_bottom": true,
+            "pour_against_soil": true,      # no formwork on faces cast against the ground
+            "ground_level_name": "NTN. +-0.00",  # or "ground_level_m"; default: the NTN level
             "create_geometry": true,
             "dry_run": false
         }
@@ -194,6 +210,8 @@ def register_formwork_routes(api):
                 ),
                 "create_geometry": create_geometry,
                 "formwork_materials": formwork_materials,
+                "pour_against_soil": bool(data.get("pour_against_soil", True)),
+                "ground_elevation_ft": _ground_elevation_ft(doc, data),
             }
 
             skipped_ids = []
@@ -265,6 +283,13 @@ def register_formwork_routes(api):
                         logger.error("Transaction rolled back due to error")
                     raise tx_error
 
+            if report.get("excluded_masonry_walls"):
+                warnings.append(
+                    "{} muro(s) de albanileria excluidos (sin encofrado; se usan solo como vecinos)".format(
+                        report["excluded_masonry_walls"]
+                    )
+                )
+
             if skipped_ids:
                 warnings.append(
                     "{} elemento(s) de element_ids omitidos (no encontrados o categoria no solicitada)".format(
@@ -281,6 +306,9 @@ def register_formwork_routes(api):
                 "category_totals": report["category_totals"],
                 "panels_created": report["panels_created"],
                 "element_count": report["element_count"],
+                "excluded_masonry_walls": report.get("excluded_masonry_walls", 0),
+                "pour_against_soil": config["pour_against_soil"],
+                "ground_level_m": round(config["ground_elevation_ft"] * 0.3048, 3),
                 "warnings": warnings,
             }
             return routes.make_response(data=response_data)

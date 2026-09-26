@@ -73,3 +73,19 @@ class TestFormworkTools:
             "beams": "Metalico",
             "columns": "Aluminio",
         }
+
+    async def test_generate_formwork_soil_options(self, mock_mcp, mock_revit_post):
+        tools = self._setup(mock_mcp, mock_revit_post)
+        await tools["generate_formwork"](ctx=None)
+        call_data = mock_revit_post.call_args[0][1]
+        assert call_data["pour_against_soil"] is True
+        assert "ground_level_name" not in call_data
+        assert "ground_level_m" not in call_data
+
+        await tools["generate_formwork"](
+            pour_against_soil=False, ground_level_name="NTN. +-0.00", ground_level_m=1.2, ctx=None
+        )
+        call_data = mock_revit_post.call_args[0][1]
+        assert call_data["pour_against_soil"] is False
+        assert call_data["ground_level_name"] == "NTN. +-0.00"
+        assert call_data["ground_level_m"] == 1.2

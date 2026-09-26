@@ -20,6 +20,9 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         contact_tolerance_mm: float = 5.0,
         exclude_top_faces: bool = True,
         exclude_foundation_bottom: bool = True,
+        pour_against_soil: bool = True,
+        ground_level_name: Optional[str] = None,
+        ground_level_m: Optional[float] = None,
         create_geometry: bool = True,
         dry_run: bool = False,
         ctx: Context = None,
@@ -57,6 +60,17 @@ def register_formwork_tools(mcp, revit_get, revit_post):
 
         Set scope="selection" and pass `element_ids` to restrict the run to
         specific elements instead of the whole model.
+
+        Masonry walls (albanileria) never get formwork; they still count as
+        neighbors (a column cast against a brick wall needs none there).
+
+        pour_against_soil (default True): faces cast against the ground get
+        no formwork, reported as excluded_soil_area_m2 - every foundation
+        face below ground level, and vertical faces below ground level that
+        look out of the building (a retaining wall's back face, perimeter
+        columns below grade). Ground level is the level named
+        `ground_level_name`, else `ground_level_m` (internal elevation, m),
+        else the model's "NTN" level.
         """
         data = {
             "scope": scope,
@@ -74,6 +88,11 @@ def register_formwork_tools(mcp, revit_get, revit_post):
             data["formwork_materials"] = formwork_materials
         if element_ids:
             data["element_ids"] = element_ids
+        data["pour_against_soil"] = pour_against_soil
+        if ground_level_name:
+            data["ground_level_name"] = ground_level_name
+        if ground_level_m is not None:
+            data["ground_level_m"] = ground_level_m
 
         response = await revit_post("/generate_formwork/", data, ctx, timeout=120.0)
         return format_response(response)

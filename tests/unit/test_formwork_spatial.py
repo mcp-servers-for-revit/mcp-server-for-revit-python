@@ -190,3 +190,28 @@ class TestEdgeSplitting:
         assert len(out) == 8  # notch: 4 corners + 4 step points
         assert (1.2, 0.94) in [pytest.approx(p) for p in out]
         assert (0.5, 0.94) in [pytest.approx(p) for p in out]
+
+
+class TestRays:
+    def test_ray_box_2d(self):
+        from revit_mcp.formwork_spatial import ray_box_2d
+
+        b = box(10, -1, 0, 12, 1, 3)
+        assert ray_box_2d((0, 0), (1, 0), b) == pytest.approx(10)
+        assert ray_box_2d((0, 0), (-1, 0), b) is None
+        assert ray_box_2d((0, 5), (1, 0), b) is None
+        assert ray_box_2d((11, 0), (1, 0), b) == 0.0  # starts inside
+
+    def test_query_ray_sorted_and_height_filtered(self):
+        h = SpatialHash(16.0)
+        h.insert("near", box(5, -1, 0, 6, 1, 3))
+        h.insert("far", box(40, -1, 0, 41, 1, 3))
+        h.insert("above", box(20, -1, 10, 21, 1, 12))  # not at ray height
+        h.insert("aside", box(20, 5, 0, 21, 6, 3))
+        hits = h.query_ray((0, 0), (1, 0), 100, 1.5)
+        assert [k for _, k in hits] == ["near", "far"]
+
+    def test_query_ray_respects_length(self):
+        h = SpatialHash(16.0)
+        h.insert("far", box(40, -1, 0, 41, 1, 3))
+        assert h.query_ray((0, 0), (1, 0), 30, 1.5) == []

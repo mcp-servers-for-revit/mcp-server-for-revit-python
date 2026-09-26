@@ -15,6 +15,7 @@ REVIT_MCP_DIR = os.path.join(EXT_ROOT, "revit_mcp")
 if REVIT_MCP_DIR not in sys.path:
     sys.path.append(REVIT_MCP_DIR)
 
+import formwork_spatial as fw_spatial
 import formwork_geometry as fw_geom
 import formwork_params as fw_params
 import utils as fw_utils
@@ -24,6 +25,7 @@ import utils as fw_utils
 # these modules was cached the first time this script ran this session -
 # force a fresh read from disk every click instead.
 reload(fw_utils)
+reload(fw_spatial)
 reload(fw_geom)
 reload(fw_params)
 
@@ -77,6 +79,21 @@ class CategoriesWindow(forms.WPFWindow):
         for _, _, _, cbo_name in CATEGORY_ROWS:
             getattr(self, cbo_name).ItemsSource = combo_items
 
+        # Ground level for "poured against soil": every level, the "NTN"
+        # one preselected.
+        self.levels = sorted(
+            DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements(),
+            key=lambda lv: lv.ProjectElevation,
+        )
+        self.cbo_ground.ItemsSource = List[str]([lv.Name for lv in self.levels])
+        default_ground = fw_geom.find_ground_elevation_ft(doc)
+        for idx, lv in enumerate(self.levels):
+            if abs(lv.ProjectElevation - default_ground) < 1e-6:
+                self.cbo_ground.SelectedIndex = idx
+                break
+        self.pour_against_soil = True
+        self.ground_elevation_ft = default_ground
+
     def select_all_click(self, sender, args):
         for _, _, chk_name, _ in CATEGORY_ROWS:
             getattr(self, chk_name).IsChecked = True
@@ -99,6 +116,11 @@ class CategoriesWindow(forms.WPFWindow):
 
         self.selected_keys = selected_keys
         self.formwork_materials = formwork_materials
+        self.pour_against_soil = bool(self.chk_soil.IsChecked)
+        if self.cbo_ground.SelectedIndex >= 0:
+            self.ground_elevation_ft = self.levels[
+                self.cbo_ground.SelectedIndex
+            ].ProjectElevation
         self.confirmed = True
         self.Close()
 
@@ -161,6 +183,8 @@ config = {
     "exclude_foundation_bottom": True,
     "create_geometry": not dry_run,
     "formwork_materials": formwork_materials,
+    "pour_against_soil": categories_window.pour_against_soil,
+    "ground_elevation_ft": categories_window.ground_elevation_ft,
 }
 
 warnings = []
@@ -194,6 +218,17 @@ for cat_label, totals in sorted(report["category_totals"].items()):
         )
     )
 output.print_md("| **Total** | | **{:.2f}** |".format(grand_total))
+
+soil_total = sum(e.get("excluded_soil_area_m2", 0.0) for e in report["elements"])
+if config["pour_against_soil"]:
+    output.print_md(
+        "
+**Vaciado contra terreno (sin encofrado):** {:.2f} m2".format(soil_total)
+    )
+if report.get("excluded_masonry_walls"):
+    output.print_md(
+        "**Muros de albanileria excluidos:** {}".format(report["excluded_masonry_walls"])
+    )
 
 if warnings:
     output.print_md("\n### Advertencias ({})".format(len(warnings)))

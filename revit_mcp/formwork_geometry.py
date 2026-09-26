@@ -166,11 +166,77 @@ class _Candidate(object):
         # the neighbor/face filters, which run a very large number of times.
         self.bbox = bbox_to_tuple(bbox)
         self.solids = None  # lazy
+        # Masonry walls are never paneled, but stay as neighbors: a column
+        # poured against a brick wall needs no formwork on that face.
+        self.is_masonry = category_key == "walls" and is_masonry_wall(element)
 
     def get_solids(self):
         if self.solids is None:
             self.solids = get_element_solids(self.element)
         return self.solids
+
+
+class _SoilCandidate(object):
+    """Pseudo-neighbor standing for the ground in front of a face that is
+    poured against the excavation: contact with it means "no formwork"."""
+
+    category_key = "soil"
+    is_masonry = False
+    element = None
+
+    def __init__(self, box, solid):
+        self.bbox = box
+        self.solids = [solid]
+
+    def get_solids(self):
+        return self.solids
+
+
+MASONRY_KEYWORDS = ("albanil", "masonry", "ladrillo", "king kong")
+
+
+def is_masonry_wall(element):
+    """Brick/block wall (albanileria): matched on the wall type name or
+    the class of its layers' materials."""
+    try:
+        doc = element.Document
+        wall_type = doc.GetElement(element.GetTypeId())
+    except Exception:
+        return False
+    if wall_type is None:
+        return False
+    names = []
+    try:
+        p = wall_type.get_Parameter(DB.BuiltInParameter.ALL_MODEL_TYPE_NAME)
+        names.append(p.AsString() if p else "")
+    except Exception:
+        pass
+    try:
+        structure = wall_type.GetCompoundStructure()
+        if structure is not None:
+            for layer in structure.GetLayers():
+                material = doc.GetElement(layer.MaterialId)
+                if material is not None:
+                    names.append(getattr(material, "MaterialClass", "") or "")
+                    names.append(getattr(material, "Name", "") or "")
+    except Exception:
+        pass
+    text = u" ".join(normalize_string(n) for n in names if n).lower()
+    text = text.replace(u"ñ", u"n")
+    return any(k in text for k in MASONRY_KEYWORDS)
+
+
+def find_ground_elevation_ft(doc):
+    """Internal elevation (ft) of the natural ground level: the level named
+    "NTN..." if there is one, else the project's zero."""
+    try:
+        for level in DB.FilteredElementCollector(doc).OfClass(DB.Level):
+            name = normalize_string(getattr(level, "Name", "")).upper()
+            if name.startswith(u"NTN"):
+                return level.ProjectElevation
+    except Exception:
+        pass
+    return 0.0
 
 
 def _face_world_bbox(face):
@@ -373,6 +439,7 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
     )
 
     contact = set()
+    soil = set()  # poured against the ground: excluded, reported apart
     for (i, j), neighbor_idxs in nearby.items():
         uv = _cell_center(i, j)
         try:
@@ -381,10 +448,13 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
             point = face.Evaluate(uv)
         except Exception:
             continue
-        if _has_contact(point, normal, tol_ft, [neighbors[k] for k in neighbor_idxs]):
+        near = [neighbors[k] for k in neighbor_idxs]
+        if _has_contact(point, normal, tol_ft, [n for n in near if n.category_key != "soil"]):
             contact.add((i, j))
+        elif _has_contact(point, normal, tol_ft, [n for n in near if n.category_key == "soil"]):
+            soil.add((i, j))
 
-    if not contact:
+    if not contact and not soil:
         # Nothing actually touches this face: the caller keeps the whole
         # face with its exact edge loops, no grid needed.
         return {"no_contact": True}
@@ -394,7 +464,7 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
     grid = [[False for _ in range(u_steps)] for _ in range(v_steps)]
     for j in range(v_steps):
         for i in range(u_steps):
-            if (i, j) in contact:
+            if (i, j) in contact or (i, j) in soil:
                 continue
             try:
                 grid[j][i] = face.IsInside(_cell_center(i, j))
@@ -457,11 +527,13 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
         included_area_m2 += area_m2
 
     contact_area_m2 = sum(_cell_area_ft2(i, j) for i, j in contact) * FT2_TO_M2
+    soil_area_m2 = sum(_cell_area_ft2(i, j) for i, j in soil) * FT2_TO_M2
 
     return {
         "included_faces": included_specs,
         "included_area_m2": included_area_m2,
         "contact_area_m2": contact_area_m2,
+        "soil_area_m2": soil_area_m2,
     }
 
 
@@ -567,7 +639,8 @@ def _joint_offset(mid, out, normal, candidate, neighbors, t, is_vertical):
         # this one stops at its outer face.
         if in_any_neighbor(
             panel_zone,
-            lambda n: CATEGORY_MAP[n.category_key]["sequence"] < own_seq,
+            lambda n: not n.is_masonry
+            and CATEGORY_MAP[n.category_key]["sequence"] < own_seq,
         ):
             return -t
         # Outside corner with another face of this same element: the
@@ -599,7 +672,9 @@ def _joint_offset(mid, out, normal, candidate, neighbors, t, is_vertical):
     if candidate.category_key == "beams":
         below = mid.Add(out.Multiply(JOINT_EPS_FT)).Subtract(up.Multiply(t / 2.0))
         if in_any_neighbor(
-            below, lambda n: CATEGORY_MAP[n.category_key]["sequence"] < own_seq
+            below,
+            lambda n: not n.is_masonry
+            and CATEGORY_MAP[n.category_key]["sequence"] < own_seq,
         ):
             return -t  # beam bottom stops at the column/wall panel face
     return 0.0
@@ -720,10 +795,15 @@ def adjust_panel_joints(face_spec, candidate, neighbors, thickness_ft):
     return adjusted
 
 
-def classify_element_faces(candidate, neighbors, config, warnings):
+def classify_element_faces(candidate, neighbors, config, warnings, soil_for_face=None):
     """Classify every planar face of `candidate`'s solids into
     included/excluded buckets. Returns a dict summary plus the list of
-    included face specs (for optional panel creation)."""
+    included face specs (for optional panel creation).
+
+    `soil_for_face(face, normal)`, when given, returns a soil
+    pseudo-neighbor for faces poured against the ground (or None); the
+    part of the face touching it is excluded and reported as
+    `excluded_soil_area_m2`."""
 
     tol_ft = config["contact_tolerance_ft"]
     grid_ft = config.get("contact_grid_ft", DEFAULT_CONTACT_GRID_FT)
@@ -735,6 +815,7 @@ def classify_element_faces(candidate, neighbors, config, warnings):
     area_top = 0.0
     area_bottom_excluded = 0.0
     area_contact = 0.0
+    area_soil = 0.0
     face_count = 0
     skipped_curved = 0
 
@@ -760,6 +841,10 @@ def classify_element_faces(candidate, neighbors, config, warnings):
             # it — narrowing down here lets untouched faces (the common
             # case) skip straight to "fully included" below.
             touching = _filter_touching_neighbors(face, neighbors, tol_ft)
+            if soil_for_face is not None:
+                soil = soil_for_face(face, normal)
+                if soil is not None:
+                    touching = touching + [soil]
 
             if touching:
                 partition = None
@@ -780,6 +865,7 @@ def classify_element_faces(candidate, neighbors, config, warnings):
                 elif partition is not None:
                     included_faces.extend(partition["included_faces"])
                     area_included += partition["included_area_m2"]
+                    area_soil += partition.get("soil_area_m2", 0.0)
                     if is_bottom:
                         area_bottom_excluded += partition["contact_area_m2"]
                     else:
@@ -832,6 +918,7 @@ def classify_element_faces(candidate, neighbors, config, warnings):
         "excluded_top_area_m2": round(area_top, 4),
         "excluded_bottom_area_m2": round(area_bottom_excluded, 4),
         "excluded_contact_area_m2": round(area_contact, 4),
+        "excluded_soil_area_m2": round(area_soil, 4),
         "face_count": face_count,
         "skipped_faces": skipped_curved,
     }
@@ -965,6 +1052,100 @@ def create_formwork_panel(
     return ds
 
 
+SOIL_MARGIN_FT = 1.0  # soil block reaches this far around/below a face
+
+
+def _soil_block(face_box, ground_z):
+    """Soil pseudo-neighbor covering a face's surroundings up to the
+    ground level, or None if the face is entirely above ground."""
+    z0 = face_box[2] - SOIL_MARGIN_FT
+    if ground_z <= face_box[2] + 1e-6:
+        return None
+    x0, y0 = face_box[0] - SOIL_MARGIN_FT, face_box[1] - SOIL_MARGIN_FT
+    x1, y1 = face_box[3] + SOIL_MARGIN_FT, face_box[4] + SOIL_MARGIN_FT
+    pts = [DB.XYZ(x0, y0, z0), DB.XYZ(x1, y0, z0), DB.XYZ(x1, y1, z0), DB.XYZ(x0, y1, z0)]
+    loop = DB.CurveLoop()
+    for k in range(4):
+        loop.Append(DB.Line.CreateBound(pts[k], pts[(k + 1) % 4]))
+    solid = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
+        List[DB.CurveLoop]([loop]), DB.XYZ(0, 0, 1), ground_z - z0
+    )
+    return _SoilCandidate((x0, y0, z0, x1, y1, ground_z), solid)
+
+
+def _make_soil_detector(neighbor_pool, neighbor_hash, ground_z):
+    """Returns candidate -> (face, normal) -> soil pseudo-neighbor | None.
+
+    Poured against the ground (no formwork) below `ground_z`:
+    - every face of a foundation;
+    - vertical faces of other elements that look out of the building,
+      i.e. a horizontal ray from the face hits no other structural
+      element (a retaining wall's back face, a perimeter column below
+      grade). Faces looking into a basement hit the elements across it
+      and keep their formwork."""
+    boxes = [c.bbox for c in neighbor_pool if c.bbox is not None]
+    if boxes:
+        span = max(
+            max(b[3] for b in boxes) - min(b[0] for b in boxes),
+            max(b[4] for b in boxes) - min(b[1] for b in boxes),
+        )
+    else:
+        span = 0.0
+    ray_len = span + 10.0
+
+    def looks_outside(candidate, face_box, normal):
+        h_len = (normal.X ** 2 + normal.Y ** 2) ** 0.5
+        if h_len < 1e-6:
+            return False
+        d = (normal.X / h_len, normal.Y / h_len)
+        z = min((face_box[2] + face_box[5]) / 2.0, (face_box[2] + ground_z) / 2.0)
+        start = (
+            (face_box[0] + face_box[3]) / 2.0 + d[0] * 0.05,
+            (face_box[1] + face_box[4]) / 2.0 + d[1] * 0.05,
+        )
+        try:
+            ray = DB.Line.CreateBound(
+                DB.XYZ(start[0], start[1], z),
+                DB.XYZ(start[0] + d[0] * ray_len, start[1] + d[1] * ray_len, z),
+            )
+        except Exception:
+            return False
+        opts = DB.SolidCurveIntersectionOptions()
+        for _, idx in neighbor_hash.query_ray(start, d, ray_len, z):
+            other = neighbor_pool[idx]
+            if other is candidate:
+                continue
+            for solid in other.get_solids():
+                try:
+                    hit = solid.IntersectWithCurve(ray, opts)
+                    if hit is not None and hit.SegmentCount > 0:
+                        return False
+                except Exception:
+                    continue
+        return True
+
+    def for_candidate(candidate):
+        is_foundation = candidate.category_key == "foundations"
+
+        def soil_for_face(face, normal):
+            face_box = _face_world_bbox(face)
+            if face_box is None or face_box[2] >= ground_z - 1e-6:
+                return None
+            if not is_foundation:
+                if abs(normal.Z) >= VERTICAL_NORMAL_Z:
+                    return None
+                if not looks_outside(candidate, face_box, normal):
+                    return None
+            try:
+                return _soil_block(face_box, ground_z)
+            except Exception:
+                return None
+
+        return soil_for_face
+
+    return for_candidate
+
+
 def process_formwork(
     doc, elements_by_category, config, warnings, context_elements_by_category=None
 ):
@@ -1006,18 +1187,21 @@ def process_formwork(
     # Pour order (CATEGORY_MAP "sequence"): an element poured earlier gets
     # its panels placed first, so later panels are the ones trimmed where
     # they would overlap (see `subtract_existing_panels`).
+    requested = _build_candidates(elements_by_category)
+    # Masonry walls get no formwork; they only act as neighbors.
+    masonry = [c for c in requested if c.is_masonry]
     candidates = sorted(
-        _build_candidates(elements_by_category),
+        [c for c in requested if not c.is_masonry],
         key=lambda c: CATEGORY_MAP[c.category_key]["sequence"],
     )
     placed_hash = SpatialHash(NEIGHBOR_HASH_CELL_FT)
     placed_solids = []
 
-    report_ids = set(element_id_value(c.element.Id) for c in candidates)
-    neighbor_pool = list(candidates)
+    neighbor_pool = list(candidates) + masonry
+    pool_ids = set(element_id_value(c.element.Id) for c in neighbor_pool)
     if context_elements_by_category:
         for candidate in _build_candidates(context_elements_by_category):
-            if element_id_value(candidate.element.Id) in report_ids:
+            if element_id_value(candidate.element.Id) in pool_ids:
                 continue  # already in candidates, avoid a duplicate entry
             neighbor_pool.append(candidate)
 
@@ -1030,6 +1214,12 @@ def process_formwork(
     neighbor_hash = SpatialHash(NEIGHBOR_HASH_CELL_FT)
     for idx, other in enumerate(neighbor_pool):
         neighbor_hash.insert(idx, other.bbox)
+
+    soil_for = None
+    if config.get("pour_against_soil"):
+        soil_for = _make_soil_detector(
+            neighbor_pool, neighbor_hash, config.get("ground_elevation_ft", 0.0)
+        )
 
     for candidate in candidates:
         neighbors = [
@@ -1047,7 +1237,13 @@ def process_formwork(
             )
             continue
 
-        classification = classify_element_faces(candidate, neighbors, config, warnings)
+        classification = classify_element_faces(
+            candidate,
+            neighbors,
+            config,
+            warnings,
+            soil_for(candidate) if soil_for is not None else None,
+        )
 
         if config["create_geometry"]:
             formwork_material = config.get("formwork_materials", {}).get(
@@ -1124,6 +1320,7 @@ def process_formwork(
                 "excluded_top_area_m2": classification["excluded_top_area_m2"],
                 "excluded_bottom_area_m2": classification["excluded_bottom_area_m2"],
                 "excluded_contact_area_m2": classification["excluded_contact_area_m2"],
+                "excluded_soil_area_m2": classification["excluded_soil_area_m2"],
                 "face_count": classification["face_count"],
             }
         )
@@ -1133,4 +1330,5 @@ def process_formwork(
         "category_totals": category_totals,
         "panels_created": panels_created,
         "element_count": len(element_results),
+        "excluded_masonry_walls": len(masonry),
     }
