@@ -1,7 +1,7 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Encofrado - Categorias a procesar"
-        Height="460" Width="500"
+        Height="494" Width="500"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize">
     <Grid Margin="15">
@@ -36,6 +36,7 @@
                 <RowDefinition Height="34"/>
                 <RowDefinition Height="34"/>
                 <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
             </Grid.RowDefinitions>
 
             <CheckBox x:Name="chk_columns" Grid.Row="0" Grid.Column="0" Content="Columnas" VerticalAlignment="Center"/>
@@ -52,6 +53,9 @@
 
             <CheckBox x:Name="chk_foundations" Grid.Row="4" Grid.Column="0" Content="Cimentacion" VerticalAlignment="Center"/>
             <ComboBox x:Name="cbo_foundations" Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_stairs" Grid.Row="5" Grid.Column="0" Content="Escaleras" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_stairs" Grid.Row="5" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
         </Grid>
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,12,0,0">

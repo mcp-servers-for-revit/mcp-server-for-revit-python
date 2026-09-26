@@ -26,7 +26,7 @@ def register_formwork_tools(mcp, revit_get, revit_post):
     ) -> str:
         """
         Generate structural formwork (encofrado) for columns, beams, slabs,
-        walls and foundations in the Revit model.
+        walls, foundations and concrete stairs in the Revit model.
 
         Avoids double-counting formwork area on faces where two structural
         elements touch (e.g. a beam-column joint) by detecting contact
@@ -41,7 +41,9 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         parameters if you need a table in the model.
 
         `categories` accepts any of: "foundations", "walls", "columns",
-        "beams", "slabs" (default: all of them). ALL elements in the
+        "beams", "slabs", "stairs" (default: all of them). For stairs,
+        risers, side faces and the sloped flight/landing soffits get
+        formwork; treads are left open like any top face. ALL elements in the
         requested categories/scope are always processed, regardless of
         their own material.
 

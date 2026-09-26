@@ -78,9 +78,19 @@ CATEGORY_MAP = {
         "sequence": 5,
         "rests_on_ground": False,
     },
+    # Monolithic concrete stairs: the Stairs element's geometry already
+    # includes its runs and landings. Treads are top faces (left open);
+    # risers, side (stringer) faces and the flight/landing soffits get
+    # formwork like any other face.
+    "stairs": {
+        "bic": DB.BuiltInCategory.OST_Stairs,
+        "label": "Escaleras",
+        "sequence": 6,
+        "rests_on_ground": False,
+    },
 }
 
-DEFAULT_CATEGORIES = ["foundations", "walls", "columns", "beams", "slabs"]
+DEFAULT_CATEGORIES = ["foundations", "walls", "columns", "beams", "slabs", "stairs"]
 
 _GEOM_OPTIONS = None
 
@@ -617,8 +627,10 @@ def adjust_panel_joints(face_spec, candidate, neighbors, thickness_ft):
     edges, strip thinner than a trim)."""
     normal = face_spec["direction"]
     is_vertical = abs(normal.Z) < VERTICAL_NORMAL_Z
+    # Any downward-facing face is a soffit, including a stair flight's
+    # sloped underside.
     is_soffit = (
-        normal.Z < BOTTOM_NORMAL_Z
+        normal.Z < -VERTICAL_NORMAL_Z
         and not CATEGORY_MAP[candidate.category_key]["rests_on_ground"]
     )
     if not (is_vertical or is_soffit):
@@ -839,6 +851,74 @@ def find_material_id(doc, material_name):
     return None
 
 
+def build_panel_solid(included_face, thickness_ft, formwork_material_id=None):
+    """Extrude an included face's loops outward by the panel thickness,
+    baking in the formwork material when it resolves to a real one."""
+    if formwork_material_id is not None:
+        try:
+            solid_options = DB.SolidOptions(
+                formwork_material_id, DB.ElementId.InvalidElementId
+            )
+            return DB.GeometryCreationUtilities.CreateExtrusionGeometry(
+                included_face["loops"],
+                included_face["direction"],
+                thickness_ft,
+                solid_options,
+            )
+        except Exception:
+            pass
+    return DB.GeometryCreationUtilities.CreateExtrusionGeometry(
+        included_face["loops"], included_face["direction"], thickness_ft
+    )
+
+
+def solid_world_box(solid):
+    """World-space box tuple of a Solid, or None."""
+    try:
+        bb = solid.GetBoundingBox()
+        tr = bb.Transform
+        pts = [
+            tr.OfPoint(DB.XYZ(x, y, z))
+            for x in (bb.Min.X, bb.Max.X)
+            for y in (bb.Min.Y, bb.Max.Y)
+            for z in (bb.Min.Z, bb.Max.Z)
+        ]
+    except Exception:
+        return None
+    return (
+        min(p.X for p in pts),
+        min(p.Y for p in pts),
+        min(p.Z for p in pts),
+        max(p.X for p in pts),
+        max(p.Y for p in pts),
+        max(p.Z for p in pts),
+    )
+
+
+# Panels whose boxes overlap by less than this in any axis only touch.
+PANEL_OVERLAP_TOL_FT = -1e-4
+MIN_PANEL_VOLUME_FT3 = 1e-6
+
+
+def subtract_existing_panels(solid, box, placed_hash, placed_solids):
+    """Remove from `solid` any volume already taken by a panel placed
+    earlier this run (a safety net for joints the edge rules don't cover,
+    e.g. a stair's sloped soffit meeting its landing, or a riser against
+    its side board). Returns the trimmed solid, or None if nothing is
+    left."""
+    for idx in placed_hash.query(box, PANEL_OVERLAP_TOL_FT):
+        try:
+            trimmed = DB.BooleanOperationsUtils.ExecuteBooleanOperation(
+                solid, placed_solids[idx], DB.BooleanOperationsType.Difference
+            )
+        except Exception:
+            continue  # keep the untrimmed shape rather than lose the panel
+        if trimmed is None or trimmed.Volume < MIN_PANEL_VOLUME_FT3:
+            return None
+        solid = trimmed
+    return solid
+
+
 def create_formwork_panel(
     doc,
     included_face,
@@ -847,6 +927,7 @@ def create_formwork_panel(
     thickness_ft,
     formwork_material="",
     formwork_material_id=None,
+    solid=None,
 ):
     """Create one DirectShape panel (Generic Models) for an included face.
 
@@ -857,27 +938,12 @@ def create_formwork_panel(
 
     `formwork_material_id`, when it resolves to a real project material
     (see `find_material_id`), is baked into the panel's own geometry so it
-    renders with that material's actual color/appearance in the model."""
-    solid_options = None
-    if formwork_material_id is not None:
-        try:
-            solid_options = DB.SolidOptions(
-                formwork_material_id, DB.ElementId.InvalidElementId
-            )
-        except Exception:
-            solid_options = None
+    renders with that material's actual color/appearance in the model.
 
-    if solid_options is not None:
-        solid = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
-            included_face["loops"],
-            included_face["direction"],
-            thickness_ft,
-            solid_options,
-        )
-    else:
-        solid = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
-            included_face["loops"], included_face["direction"], thickness_ft
-        )
+    `solid`, when given, is used as the panel's shape instead of extruding
+    the face (e.g. one already trimmed against other panels)."""
+    if solid is None:
+        solid = build_panel_solid(included_face, thickness_ft, formwork_material_id)
     category_id = DB.ElementId(DB.BuiltInCategory.OST_GenericModel)
     ds = DB.DirectShape.CreateElement(doc, category_id)
     ds.SetShape(List[DB.GeometryObject]([solid]))
@@ -937,7 +1003,15 @@ def process_formwork(
                 built.append(_Candidate(element, category_key, bbox))
         return built
 
-    candidates = _build_candidates(elements_by_category)
+    # Pour order (CATEGORY_MAP "sequence"): an element poured earlier gets
+    # its panels placed first, so later panels are the ones trimmed where
+    # they would overlap (see `subtract_existing_panels`).
+    candidates = sorted(
+        _build_candidates(elements_by_category),
+        key=lambda c: CATEGORY_MAP[c.category_key]["sequence"],
+    )
+    placed_hash = SpatialHash(NEIGHBOR_HASH_CELL_FT)
+    placed_solids = []
 
     report_ids = set(element_id_value(c.element.Id) for c in candidates)
     neighbor_pool = list(candidates)
@@ -985,7 +1059,12 @@ def process_formwork(
                 )
             formwork_material_id = material_id_cache[formwork_material]
 
-            for face_spec in classification["included_faces"]:
+            # Larger panels first, so within one element the big boards run
+            # through and the small ones (risers, strips) fit around them.
+            specs = sorted(
+                classification["included_faces"], key=lambda s: -s["area_m2"]
+            )
+            for face_spec in specs:
                 try:
                     face_spec = adjust_panel_joints(
                         face_spec, candidate, neighbors, config["panel_thickness_ft"]
@@ -993,6 +1072,17 @@ def process_formwork(
                 except Exception:
                     pass  # keep the plain face-shaped panel
                 try:
+                    solid = build_panel_solid(
+                        face_spec, config["panel_thickness_ft"], formwork_material_id
+                    )
+                    box = solid_world_box(solid)
+                    if box is not None:
+                        solid = subtract_existing_panels(
+                            solid, box, placed_hash, placed_solids
+                        )
+                        if solid is None:
+                            continue  # fully covered by earlier panels
+                        box = solid_world_box(solid) or box
                     create_formwork_panel(
                         doc,
                         face_spec,
@@ -1001,7 +1091,11 @@ def process_formwork(
                         config["panel_thickness_ft"],
                         formwork_material,
                         formwork_material_id,
+                        solid=solid,
                     )
+                    if box is not None:
+                        placed_hash.insert(len(placed_solids), box)
+                        placed_solids.append(solid)
                     panels_created += 1
                 except Exception as e:
                     warnings.append(

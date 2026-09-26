@@ -48,6 +48,17 @@ def _resolve_by_selection(doc, element_ids, category_keys):
             skipped.append(raw_id)
             continue
 
+        # A picked stair run/landing stands for its whole stair, whose
+        # geometry already includes every run and landing.
+        get_stairs = getattr(elem, "GetStairs", None)
+        if get_stairs is not None:
+            try:
+                elem = get_stairs() or elem
+            except Exception:
+                pass
+        if any(elem.Id.Equals(e.Id) for group in elements_by_category.values() for e in group):
+            continue
+
         key = None
         # Match by category Id directly against the map (more robust than
         # round-tripping through BuiltInCategory casts across API versions).
@@ -82,7 +93,7 @@ def register_formwork_routes(api):
         {
             "scope": "model" | "selection",
             "element_ids": [123, 456],              # required if scope == "selection"
-            "categories": ["columns","beams","slabs","walls","foundations"],
+            "categories": ["columns","beams","slabs","walls","foundations","stairs"],
             "formwork_material": "Madera",               # default tag, all categories
             "formwork_materials": {                       # optional per-category override
                 "beams": "Metalico",

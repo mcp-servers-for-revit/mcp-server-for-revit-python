@@ -41,6 +41,7 @@ CATEGORY_ROWS = [
     ("Losas", "slabs", "chk_slabs", "cbo_slabs"),
     ("Muros", "walls", "chk_walls", "cbo_walls"),
     ("Cimentacion", "foundations", "chk_foundations", "cbo_foundations"),
+    ("Escaleras", "stairs", "chk_stairs", "cbo_stairs"),
 ]
 
 
