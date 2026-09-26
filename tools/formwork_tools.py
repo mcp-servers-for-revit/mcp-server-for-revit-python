@@ -14,8 +14,8 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         scope: str = "model",
         element_ids: Optional[List[int]] = None,
         categories: Optional[List[str]] = None,
-        material_filter: str = "",
-        material_filters: Optional[Dict[str, str]] = None,
+        formwork_material: str = "",
+        formwork_materials: Optional[Dict[str, str]] = None,
         panel_thickness_mm: float = 18.0,
         contact_tolerance_mm: float = 5.0,
         exclude_top_faces: bool = True,
@@ -25,8 +25,8 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         ctx: Context = None,
     ) -> str:
         """
-        Generate structural formwork (encofrado) for concrete columns, beams,
-        slabs, walls and foundations in the Revit model.
+        Generate structural formwork (encofrado) for columns, beams, slabs,
+        walls and foundations in the Revit model.
 
         Avoids double-counting formwork area on faces where two structural
         elements touch (e.g. a beam-column joint) by detecting contact
@@ -37,24 +37,28 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         Use dry_run=True to get a quantity/area report without creating any
         geometry, to preview before committing. Quantity takeoff is always
         returned in the report; build a native Revit schedule off the
-        created panels' EF_Area_m2 / EF_Categoria_Origen parameters if you
-        need a table in the model.
+        created panels' EF_Area_m2 / EF_Categoria_Origen / EF_Material_Encofrado
+        parameters if you need a table in the model.
 
         `categories` accepts any of: "foundations", "walls", "columns",
-        "beams", "slabs" (default: all of them).
+        "beams", "slabs" (default: all of them). ALL elements in the
+        requested categories/scope are always processed, regardless of
+        their own material.
 
-        material_filter is the default material substring filter (matched
-        against structural material, type name or family name) applied to
-        every category. Use material_filters to set an independent filter
-        per category, e.g. {"beams": "f'c=210", "columns": "f'c=280"} —
-        any category not listed there falls back to material_filter.
+        formwork_material is a free-text tag (e.g. "Madera", "Metalico",
+        "Aluminio") recorded on the created panels to identify what the
+        formwork itself is made of. Use formwork_materials to set an
+        independent tag per category, e.g. {"beams": "Metalico",
+        "columns": "Aluminio"} — any category not listed there falls back
+        to formwork_material. This never filters which elements get
+        processed.
 
         Set scope="selection" and pass `element_ids` to restrict the run to
         specific elements instead of the whole model.
         """
         data = {
             "scope": scope,
-            "material_filter": material_filter,
+            "formwork_material": formwork_material,
             "panel_thickness_mm": panel_thickness_mm,
             "contact_tolerance_mm": contact_tolerance_mm,
             "exclude_top_faces": exclude_top_faces,
@@ -64,8 +68,8 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         }
         if categories:
             data["categories"] = categories
-        if material_filters:
-            data["material_filters"] = material_filters
+        if formwork_materials:
+            data["formwork_materials"] = formwork_materials
         if element_ids:
             data["element_ids"] = element_ids
 

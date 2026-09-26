@@ -26,7 +26,7 @@ class TestFormworkTools:
         assert args[0] == "/generate_formwork/"
         call_data = args[1]
         assert call_data["scope"] == "model"
-        assert call_data["material_filter"] == ""
+        assert call_data["formwork_material"] == ""
         assert call_data["panel_thickness_mm"] == 18.0
         assert call_data["contact_tolerance_mm"] == 5.0
         assert call_data["exclude_top_faces"] is True
@@ -34,7 +34,7 @@ class TestFormworkTools:
         assert call_data["create_geometry"] is True
         assert call_data["dry_run"] is False
         assert "categories" not in call_data
-        assert "material_filters" not in call_data
+        assert "formwork_materials" not in call_data
         assert "element_ids" not in call_data
         assert kwargs["timeout"] == 120.0
 
@@ -60,16 +60,16 @@ class TestFormworkTools:
         assert call_data["scope"] == "selection"
         assert call_data["element_ids"] == [111, 222]
 
-    async def test_generate_formwork_per_category_material_filters(
+    async def test_generate_formwork_per_category_formwork_materials(
         self, mock_mcp, mock_revit_post
     ):
         tools = self._setup(mock_mcp, mock_revit_post)
         await tools["generate_formwork"](
-            material_filters={"beams": "f'c=210", "columns": "f'c=280"},
+            formwork_materials={"beams": "Metalico", "columns": "Aluminio"},
             ctx=None,
         )
         call_data = mock_revit_post.call_args[0][1]
-        assert call_data["material_filters"] == {
-            "beams": "f'c=210",
-            "columns": "f'c=280",
+        assert call_data["formwork_materials"] == {
+            "beams": "Metalico",
+            "columns": "Aluminio",
         }

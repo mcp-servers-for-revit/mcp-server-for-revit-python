@@ -17,31 +17,100 @@ if REVIT_MCP_DIR not in sys.path:
 
 import formwork_geometry as fw_geom
 import formwork_params as fw_params
+import utils as fw_utils
+
+# pyRevit reuses one interpreter/sys.modules across button clicks, so a
+# plain `import` here would silently keep serving whatever version of
+# these modules was cached the first time this script ran this session -
+# force a fresh read from disk every click instead.
+reload(fw_utils)
+reload(fw_geom)
+reload(fw_params)
 
 from pyrevit import revit, DB, forms, script
+from System.Collections.Generic import List
 
 output = script.get_output()
 doc = revit.doc
 
-CATEGORY_LABELS = [
-    ("Columnas", "columns"),
-    ("Vigas", "beams"),
-    ("Losas", "slabs"),
-    ("Muros", "walls"),
-    ("Cimentacion", "foundations"),
+# (label, category_key, checkbox x:Name, material combobox x:Name) - order
+# matches the rows laid out in CategoriesForm.xaml
+CATEGORY_ROWS = [
+    ("Columnas", "columns", "chk_columns", "cbo_columns"),
+    ("Vigas", "beams", "chk_beams", "cbo_beams"),
+    ("Losas", "slabs", "chk_slabs", "cbo_slabs"),
+    ("Muros", "walls", "chk_walls", "cbo_walls"),
+    ("Cimentacion", "foundations", "chk_foundations", "cbo_foundations"),
 ]
 
-selected_labels = forms.SelectFromList.show(
-    [label for label, _ in CATEGORY_LABELS],
-    multiselect=True,
-    title="Encofrado - Categorias a procesar",
-    button_name="Continuar",
-)
 
-if not selected_labels:
+class CategoriesWindow(forms.WPFWindow):
+    """Category picker with an independent formwork-material TAG per
+    category. This never filters which elements get processed - ALL
+    elements of the checked categories are always included. The picked
+    material (any of the project's real materials, or free text) is only
+    recorded on the created panels to identify what the formwork itself
+    is made of (e.g. Madera, Metalico, Aluminio).
+    """
+
+    def __init__(self, xaml_file_path):
+        forms.WPFWindow.__init__(self, xaml_file_path)
+        self.confirmed = False
+        self.selected_keys = []
+        self.formwork_materials = {}
+
+        try:
+            material_names = sorted(
+                set(
+                    m.Name
+                    for m in DB.FilteredElementCollector(doc)
+                    .OfClass(DB.Material)
+                    .ToElements()
+                    if getattr(m, "Name", None)
+                )
+            )
+        except Exception:
+            material_names = []
+
+        combo_items = List[str]([""] + material_names)
+        for _, _, _, cbo_name in CATEGORY_ROWS:
+            getattr(self, cbo_name).ItemsSource = combo_items
+
+    def select_all_click(self, sender, args):
+        for _, _, chk_name, _ in CATEGORY_ROWS:
+            getattr(self, chk_name).IsChecked = True
+
+    def select_none_click(self, sender, args):
+        for _, _, chk_name, _ in CATEGORY_ROWS:
+            getattr(self, chk_name).IsChecked = False
+
+    def continue_click(self, sender, args):
+        selected_keys = []
+        formwork_materials = {}
+        for _, key, chk_name, cbo_name in CATEGORY_ROWS:
+            if getattr(self, chk_name).IsChecked:
+                selected_keys.append(key)
+                formwork_materials[key] = getattr(self, cbo_name).Text or ""
+
+        if not selected_keys:
+            forms.alert("Selecciona al menos una categoria.", title="Encofrado")
+            return
+
+        self.selected_keys = selected_keys
+        self.formwork_materials = formwork_materials
+        self.confirmed = True
+        self.Close()
+
+
+xaml_path = os.path.join(SCRIPT_DIR, "CategoriesForm.xaml")
+categories_window = CategoriesWindow(xaml_path)
+categories_window.ShowDialog()
+
+if not categories_window.confirmed:
     script.exit()
 
-selected_keys = [key for label, key in CATEGORY_LABELS if label in selected_labels]
+selected_keys = categories_window.selected_keys
+formwork_materials = categories_window.formwork_materials
 
 mode = forms.CommandSwitchWindow.show(
     ["Vista previa (sin cambios en el modelo)", "Generar geometria y cantidades"],
@@ -52,23 +121,6 @@ if not mode:
     script.exit()
 
 dry_run = mode.startswith("Vista previa")
-
-# Filtro de material independiente por categoria (ej. distinto f'c para
-# vigas y columnas), en vez de un unico filtro para todo.
-material_filters = {}
-for label, key in CATEGORY_LABELS:
-    if key not in selected_keys:
-        continue
-    value = forms.ask_for_string(
-        default="",
-        prompt="Filtro de material para {} (opcional, ej. 'concreto'). Vacio = sin filtro.".format(
-            label
-        ),
-        title="Encofrado - Material",
-    )
-    if value is None:
-        script.exit()
-    material_filters[key] = value
 
 
 def collect(bic):
@@ -83,19 +135,23 @@ def collect(bic):
 elements_by_category = {}
 for key in selected_keys:
     cat_info = fw_geom.CATEGORY_MAP[key]
-    all_elements = collect(cat_info["bic"])
-    elements_by_category[key] = [
-        el
-        for el in all_elements
-        if fw_geom.element_matches_material(el, material_filters.get(key, ""))
-    ]
+    elements_by_category[key] = collect(cat_info["bic"])
 
 total_candidates = sum(len(v) for v in elements_by_category.values())
 if total_candidates == 0:
     forms.alert(
-        "No se encontraron elementos que cumplan los criterios.", title="Encofrado"
+        "No se encontraron elementos en las categorias seleccionadas.",
+        title="Encofrado",
     )
     script.exit()
+
+# Every structural category, used only as neighbor context for contact
+# trimming (never reported/paneled unless also selected above) - so a
+# wall's panel still gets trimmed against a beam it touches even if you
+# only picked "Muros" this run.
+context_elements_by_category = {
+    key: collect(fw_geom.CATEGORY_MAP[key]["bic"]) for key in fw_geom.CATEGORY_MAP
+}
 
 config = {
     "contact_tolerance_ft": 5.0 / 304.8,
@@ -103,16 +159,21 @@ config = {
     "exclude_top_faces": True,
     "exclude_foundation_bottom": True,
     "create_geometry": not dry_run,
+    "formwork_materials": formwork_materials,
 }
 
 warnings = []
 
 if dry_run:
-    report = fw_geom.process_formwork(doc, elements_by_category, config, warnings)
+    report = fw_geom.process_formwork(
+        doc, elements_by_category, config, warnings, context_elements_by_category
+    )
 else:
     with revit.Transaction("Generar Encofrado"):
         warnings.extend(fw_params.ensure_shared_parameters(doc))
-        report = fw_geom.process_formwork(doc, elements_by_category, config, warnings)
+        report = fw_geom.process_formwork(
+            doc, elements_by_category, config, warnings, context_elements_by_category
+        )
 
 output.print_md(
     "# Resultado Encofrado {}".format("(vista previa)" if dry_run else "")

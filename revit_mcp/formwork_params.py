@@ -20,6 +20,7 @@ PANEL_PARAMS = [
     ("EF_Elemento_Origen_Id", True),
     ("EF_Categoria_Origen", True),
     ("EF_Area_m2", False),
+    ("EF_Material_Encofrado", True),
 ]
 
 PANEL_CATEGORIES = [DB.BuiltInCategory.OST_GenericModel]

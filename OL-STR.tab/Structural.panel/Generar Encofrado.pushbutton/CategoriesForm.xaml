@@ -1,0 +1,64 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Encofrado - Categorias a procesar"
+        Height="460" Width="500"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Selecciona las categorias a procesar. Todos sus elementos se incluyen siempre; el material es solo para identificar el tipo de encofrado usado (madera, metalico, aluminio, etc.), no filtra elementos."/>
+
+        <Grid Grid.Row="1" Margin="0,0,0,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Categoria" FontWeight="Bold"/>
+            <TextBlock Grid.Column="1" Text="Material del encofrado (opcional)" FontWeight="Bold"/>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+            </Grid.RowDefinitions>
+
+            <CheckBox x:Name="chk_columns" Grid.Row="0" Grid.Column="0" Content="Columnas" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_columns" Grid.Row="0" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_beams" Grid.Row="1" Grid.Column="0" Content="Vigas" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_beams" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_slabs" Grid.Row="2" Grid.Column="0" Content="Losas" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_slabs" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_walls" Grid.Row="3" Grid.Column="0" Content="Muros" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_walls" Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_foundations" Grid.Row="4" Grid.Column="0" Content="Cimentacion" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_foundations" Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+        </Grid>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button x:Name="button_select_all" Content="Marcar todo" Width="150" Height="28" Margin="0,0,8,0" Click="select_all_click"/>
+            <Button x:Name="button_select_none" Content="Desmarcar todo" Width="150" Height="28" Click="select_none_click"/>
+        </StackPanel>
+
+        <Button Grid.Row="4" x:Name="button_continue" Content="Continuar" Height="34" Margin="0,12,0,0" Click="continue_click"/>
+    </Grid>
+</Window>

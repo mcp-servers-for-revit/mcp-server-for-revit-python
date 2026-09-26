@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "Revit-Connector-Python": {
+      "command": "C:\\Users\\oscar\\.local\\bin\\uv.exe",
+      "args": [
+        "run",
+        "--with",
+        "mcp[cli]",
+        "mcp",
+        "run",
+        "C:\\Users\\oscar\\AppData\\Roaming\\pyRevit\\Extensions\\mcp-server-for-revit-python.extension\\main.py"
+      ],
+      "env": {
+        "REVIT_MCP_PORT": "48884"
+      }
+    }
+  }
+}

@@ -109,66 +109,6 @@ def get_element_solids(element):
     return solids
 
 
-def element_matches_material(element, material_filter):
-    """Best-effort structural-material check. Fails OPEN (includes the
-    element) when the material can't be determined, so an incomplete/odd
-    project setup never silently drops elements from the takeoff.
-
-    Checks, in order: the STRUCTURAL_MATERIAL_PARAM instance/type
-    parameter (reliable for framing/columns), an explicit "Structural
-    Material" type lookup, and finally the element/type NAME itself —
-    many real projects (this one included) encode the material in the
-    family/type name (e.g. "MURO DE CORTE_CONCRETO..." vs "MURO DE
-    ALBANILERIA...") rather than in a material parameter, especially for
-    walls and floors where Revit has no single per-instance material."""
-    if not material_filter:
-        return True
-    needle = material_filter.strip().lower()
-    if not needle:
-        return True
-
-    candidate_names = []
-    try:
-        mat_param = element.get_Parameter(DB.BuiltInParameter.STRUCTURAL_MATERIAL_PARAM)
-        if mat_param and mat_param.HasValue:
-            mat_id = mat_param.AsElementId()
-            if mat_id and element_id_value(mat_id) > 0:
-                mat_elem = element.Document.GetElement(mat_id)
-                if mat_elem:
-                    candidate_names.append(normalize_string(get_name_safe(mat_elem)))
-    except Exception:
-        pass
-
-    type_elem = None
-    try:
-        type_elem = element.Document.GetElement(element.GetTypeId())
-    except Exception:
-        pass
-
-    if type_elem:
-        try:
-            p = type_elem.LookupParameter("Structural Material")
-            if p and p.HasValue and p.StorageType == DB.StorageType.ElementId:
-                mat_id = p.AsElementId()
-                if mat_id and element_id_value(mat_id) > 0:
-                    mat_elem = element.Document.GetElement(mat_id)
-                    if mat_elem:
-                        candidate_names.append(normalize_string(get_name_safe(mat_elem)))
-        except Exception:
-            pass
-        candidate_names.append(normalize_string(get_name_safe(type_elem)))
-
-    candidate_names.append(normalize_string(get_name_safe(element)))
-
-    if not candidate_names:
-        return True  # can't tell -> don't exclude
-
-    for name in candidate_names:
-        if needle in name.lower():
-            return True
-    return False
-
-
 def get_name_safe(element):
     try:
         return element.Name
@@ -586,11 +526,59 @@ def classify_element_faces(candidate, neighbors, config, warnings):
     }
 
 
-def create_formwork_panel(doc, included_face, source_element, category_key, thickness_ft):
-    """Create one DirectShape panel (Generic Models) for an included face."""
-    solid = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
-        included_face["loops"], included_face["direction"], thickness_ft
-    )
+def find_material_id(doc, material_name):
+    """Resolve a material name to its ElementId, or None if blank/not
+    found (a freely-typed tag that isn't a real project material)."""
+    if not material_name:
+        return None
+    try:
+        for m in DB.FilteredElementCollector(doc).OfClass(DB.Material):
+            if getattr(m, "Name", None) == material_name:
+                return m.Id
+    except Exception:
+        pass
+    return None
+
+
+def create_formwork_panel(
+    doc,
+    included_face,
+    source_element,
+    category_key,
+    thickness_ft,
+    formwork_material="",
+    formwork_material_id=None,
+):
+    """Create one DirectShape panel (Generic Models) for an included face.
+
+    `formwork_material` is a free-text tag (e.g. "Madera", "Metalico") that
+    identifies what the formwork itself is made of - it has no relation to
+    the source element's own material and is never used to filter which
+    elements get processed, only recorded on the panel for later takeoff.
+
+    `formwork_material_id`, when it resolves to a real project material
+    (see `find_material_id`), is baked into the panel's own geometry so it
+    renders with that material's actual color/appearance in the model."""
+    solid_options = None
+    if formwork_material_id is not None:
+        try:
+            solid_options = DB.SolidOptions(
+                formwork_material_id, DB.ElementId.InvalidElementId
+            )
+        except Exception:
+            solid_options = None
+
+    if solid_options is not None:
+        solid = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
+            included_face["loops"],
+            included_face["direction"],
+            thickness_ft,
+            solid_options,
+        )
+    else:
+        solid = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
+            included_face["loops"], included_face["direction"], thickness_ft
+        )
     category_id = DB.ElementId(DB.BuiltInCategory.OST_GenericModel)
     ds = DB.DirectShape.CreateElement(doc, category_id)
     ds.SetShape(List[DB.GeometryObject]([solid]))
@@ -599,6 +587,7 @@ def create_formwork_panel(doc, included_face, source_element, category_key, thic
     for name, value in (
         ("EF_Elemento_Origen_Id", str(element_id_value(source_element.Id))),
         ("EF_Categoria_Origen", CATEGORY_MAP[category_key]["label"]),
+        ("EF_Material_Encofrado", formwork_material or ""),
     ):
         p = ds.LookupParameter(name)
         if p and not p.IsReadOnly:
@@ -611,35 +600,64 @@ def create_formwork_panel(doc, included_face, source_element, category_key, thic
     return ds
 
 
-def process_formwork(doc, elements_by_category, config, warnings):
-    """Main orchestrator. `elements_by_category` = {category_key: [Element,...]}.
-    `config` = dict with contact_tolerance_ft, panel_thickness_ft,
-    exclude_top_faces, exclude_foundation_bottom, create_geometry.
-    Returns the report dict (mutates the model when create_geometry is
-    true — caller must run this inside an active Transaction). Quantity
-    takeoff is always returned in the report (per-element and per-category
-    totals); build a native Revit schedule off the created panels'
-    EF_Area_m2 / EF_Categoria_Origen parameters if you need a table in
-    the model."""
+def process_formwork(
+    doc, elements_by_category, config, warnings, context_elements_by_category=None
+):
+    """Main orchestrator. `elements_by_category` = {category_key: [Element,...]}
+    are the elements to actually report on / create panels for.
+    `context_elements_by_category` (same shape) are extra elements used
+    ONLY for contact/neighbor detection - never reported or paneled
+    themselves (unless they also appear in `elements_by_category`).
+    Pass every structural category here (not just the ones the caller
+    asked to process) so e.g. a wall's panel still gets trimmed against a
+    beam it touches even when the beam itself wasn't requested this run -
+    otherwise contact can only ever be detected between elements
+    processed together in the very same call.
 
-    candidates = []
-    for category_key, elements in elements_by_category.items():
-        for element in elements:
-            try:
-                bbox = element.get_BoundingBox(None)
-            except Exception:
-                bbox = None
-            candidates.append(_Candidate(element, category_key, bbox))
+    `config` = dict with contact_tolerance_ft, panel_thickness_ft,
+    exclude_top_faces, exclude_foundation_bottom, create_geometry, and
+    optionally formwork_materials ({category_key: material_tag}) - a
+    free-text label per category recorded on the created panels to
+    identify what the formwork is made of (wood, metal, etc.); it never
+    filters which elements get processed. Returns the report dict
+    (mutates the model when create_geometry is true — caller must run
+    this inside an active Transaction). Quantity takeoff is always
+    returned in the report (per-element and per-category totals); build
+    a native Revit schedule off the created panels' EF_Area_m2 /
+    EF_Categoria_Origen / EF_Material_Encofrado parameters if you need a
+    table in the model."""
+
+    def _build_candidates(by_category):
+        built = []
+        for category_key, elements in by_category.items():
+            for element in elements:
+                try:
+                    bbox = element.get_BoundingBox(None)
+                except Exception:
+                    bbox = None
+                built.append(_Candidate(element, category_key, bbox))
+        return built
+
+    candidates = _build_candidates(elements_by_category)
+
+    report_ids = set(element_id_value(c.element.Id) for c in candidates)
+    neighbor_pool = list(candidates)
+    if context_elements_by_category:
+        for candidate in _build_candidates(context_elements_by_category):
+            if element_id_value(candidate.element.Id) in report_ids:
+                continue  # already in candidates, avoid a duplicate entry
+            neighbor_pool.append(candidate)
 
     tol_ft = config["contact_tolerance_ft"]
     element_results = []
     category_totals = {}
     panels_created = 0
+    material_id_cache = {}
 
     for candidate in candidates:
         neighbors = [
             other
-            for other in candidates
+            for other in neighbor_pool
             if other is not candidate
             and _bbox_overlaps(candidate.bbox, other.bbox, tol_ft)
         ]
@@ -656,6 +674,15 @@ def process_formwork(doc, elements_by_category, config, warnings):
         classification = classify_element_faces(candidate, neighbors, config, warnings)
 
         if config["create_geometry"]:
+            formwork_material = config.get("formwork_materials", {}).get(
+                candidate.category_key, ""
+            )
+            if formwork_material not in material_id_cache:
+                material_id_cache[formwork_material] = find_material_id(
+                    doc, formwork_material
+                )
+            formwork_material_id = material_id_cache[formwork_material]
+
             for face_spec in classification["included_faces"]:
                 try:
                     create_formwork_panel(
@@ -664,6 +691,8 @@ def process_formwork(doc, elements_by_category, config, warnings):
                         candidate.element,
                         candidate.category_key,
                         config["panel_thickness_ft"],
+                        formwork_material,
+                        formwork_material_id,
                     )
                     panels_created += 1
                 except Exception as e:
