@@ -70,7 +70,11 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         look out of the building (a retaining wall's back face, perimeter
         columns below grade). Ground level is the level named
         `ground_level_name`, else `ground_level_m` (internal elevation, m),
-        else the model's "NTN" level.
+        else the model's "NTN" level. Per wall, the instance parameter
+        EF_Cara_Contra_Terreno overrides the automatic detection:
+        "Exterior" / "Interior" (the wall's own sides), "Ambas" or
+        "Ninguna"; blank = automatic. Chosen faces count as against the
+        ground over their full height.
         """
         data = {
             "scope": scope,

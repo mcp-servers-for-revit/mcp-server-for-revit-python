@@ -1073,6 +1073,36 @@ def _soil_block(face_box, ground_z):
     return _SoilCandidate((x0, y0, z0, x1, y1, ground_z), solid)
 
 
+SOIL_OVERRIDE_PARAM = "EF_Cara_Contra_Terreno"
+SOIL_OVERRIDE_VALUES = {
+    u"exterior": "exterior",
+    u"ext": "exterior",
+    u"interior": "interior",
+    u"int": "interior",
+    u"ambas": "both",
+    u"ambos": "both",
+    u"both": "both",
+    u"ninguna": "none",
+    u"ninguno": "none",
+    u"no": "none",
+    u"none": "none",
+}
+
+
+def wall_soil_override(element):
+    """Manual EF_Cara_Contra_Terreno value of a wall: "exterior",
+    "interior", "both", "none", or None (blank/unknown = automatic)."""
+    try:
+        p = element.LookupParameter(SOIL_OVERRIDE_PARAM)
+        raw = p.AsString() if p is not None else None
+    except Exception:
+        raw = None
+    if not raw:
+        return None
+    key = normalize_string(raw).lower().replace(u"í", u"i").strip()
+    return SOIL_OVERRIDE_VALUES.get(key)
+
+
 def _make_soil_detector(neighbor_pool, neighbor_hash, ground_z):
     """Returns candidate -> (face, normal) -> soil pseudo-neighbor | None.
 
@@ -1082,7 +1112,12 @@ def _make_soil_detector(neighbor_pool, neighbor_hash, ground_z):
       i.e. a horizontal ray from the face hits no other structural
       element (a retaining wall's back face, a perimeter column below
       grade). Faces looking into a basement hit the elements across it
-      and keep their formwork."""
+      and keep their formwork.
+
+    A wall's EF_Cara_Contra_Terreno value overrides the automatic
+    detection for that wall: the chosen face(s) are against the ground
+    over their full height (whatever the ground level), the others get
+    formwork."""
     boxes = [c.bbox for c in neighbor_pool if c.bbox is not None]
     if boxes:
         span = max(
@@ -1126,6 +1161,34 @@ def _make_soil_detector(neighbor_pool, neighbor_hash, ground_z):
 
     def for_candidate(candidate):
         is_foundation = candidate.category_key == "foundations"
+        override = None
+        exterior_dir = None
+        if candidate.category_key == "walls":
+            override = wall_soil_override(candidate.element)
+            try:
+                exterior_dir = candidate.element.Orientation
+            except Exception:
+                exterior_dir = None
+
+        def manual_soil_for_face(face, normal):
+            if override == "none" or abs(normal.Z) >= VERTICAL_NORMAL_Z:
+                return None
+            side = None
+            if exterior_dir is not None:
+                d = normal.DotProduct(exterior_dir)
+                side = "exterior" if d > 0.5 else ("interior" if d < -0.5 else None)
+            if side is None or override not in ("both", side):
+                return None  # wall ends, or the face the user left open
+            face_box = _face_world_bbox(face)
+            if face_box is None:
+                return None
+            try:
+                return _soil_block(face_box, face_box[5] + SOIL_MARGIN_FT)
+            except Exception:
+                return None
+
+        if override is not None:
+            return manual_soil_for_face
 
         def soil_for_face(face, normal):
             face_box = _face_world_bbox(face)

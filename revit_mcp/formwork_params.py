@@ -25,6 +25,14 @@ PANEL_PARAMS = [
 
 PANEL_CATEGORIES = [DB.BuiltInCategory.OST_GenericModel]
 
+# Instance parameters the user fills on source elements to steer the run.
+# EF_Cara_Contra_Terreno (walls): which face is cast against the ground -
+# "Exterior" / "Interior" (the wall's own exterior/interior side, as its
+# flip arrows show), "Ambas", "Ninguna", or blank for automatic detection.
+ELEMENT_PARAMS = [
+    ("EF_Cara_Contra_Terreno", True, [DB.BuiltInCategory.OST_Walls]),
+]
+
 _FILE_HEADER = (
     "# This is a Revit shared parameter file.\n"
     "# Do not edit manually.\n"
@@ -99,7 +107,8 @@ def _ensure_binding(doc, definition, built_in_categories, is_instance=True):
 
 def ensure_shared_parameters(doc):
     """Make sure every formwork panel parameter exists and is bound to
-    the Generic Models category. Must be called inside an active
+    the Generic Models category, and the per-element control parameters
+    (ELEMENT_PARAMS) to their categories. Must be called inside an active
     Transaction. Returns a list of human-readable warnings (empty on
     full success)."""
 
@@ -131,6 +140,15 @@ def ensure_shared_parameters(doc):
         try:
             definition = _get_or_create_definition(group, name, is_text)
             _ensure_binding(doc, definition, PANEL_CATEGORIES, is_instance=True)
+        except Exception as e:
+            warnings.append(
+                "No se pudo crear/enlazar el parametro {}: {}".format(name, str(e))
+            )
+
+    for name, is_text, categories in ELEMENT_PARAMS:
+        try:
+            definition = _get_or_create_definition(group, name, is_text)
+            _ensure_binding(doc, definition, categories, is_instance=True)
         except Exception as e:
             warnings.append(
                 "No se pudo crear/enlazar el parametro {}: {}".format(name, str(e))
