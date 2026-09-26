@@ -12,3 +12,6 @@ wheels/
 *TODO.md
 .env
 CLAUDE.md
+
+# Local Codex CLI config
+.codex/
