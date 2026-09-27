@@ -16,8 +16,8 @@ in the column type's parameters:
                            longitudinal bars, closed stirrups and grapas
 
 The drawing is used as drawn (any section shape: rectangle, trapezoid,
-L, T...). A drawn stirrup around every bar is the perimeter ("borde")
-one; any other stirrup is a confinement one.
+L, T...). Each drawn stirrup/crosstie carries the family chosen when it
+was sketched: edge ("borde") or confinement.
 
 Longitudinal bars run the column's full height (level to level; laps and
 anchorages are not modeled). Stirrups and ties are laid out from both ends
@@ -202,19 +202,17 @@ class ColumnSpec(object):
             raise spec.SpecError(u"dibuja las barras longitudinales de la seccion (o usa Automatico)")
         if not self.design["stirrups"]:
             raise spec.SpecError(u"dibuja al menos el estribo de borde")
-        needs_confinement = self.design["ties"] or any(
-            not spec.is_edge_stirrup(poly, self.design["bars"]) for poly in self.design["stirrups"]
-        )
-        if needs_confinement and self.confinement is None:
+        kinds = [k for k, _ in self.design["stirrups"]] + [t[0] for t in self.design["ties"]]
+        if spec.KIND_CONFINEMENT in kinds and self.confinement is None:
             raise spec.SpecError(
-                u"el dibujo tiene estribos de confinamiento o grapas: falta su diametro y distribucion"
+                u"el dibujo tiene estribos o grapas de confinamiento: falta su diametro y distribucion"
             )
 
-    def family_of(self, polygon):
-        """(kind, StirrupFamily) of a drawn stirrup."""
-        if spec.is_edge_stirrup(polygon, self.design["bars"]):
-            return EDGE, self.edge
-        return CONFINEMENT, self.confinement
+    def family_of(self, kind):
+        """(kind, StirrupFamily) of a drawn stirrup or tie."""
+        if kind == spec.KIND_CONFINEMENT:
+            return CONFINEMENT, self.confinement
+        return EDGE, self.edge
 
 
 class BarTypes(object):
@@ -460,13 +458,13 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark):
     z_clear_top = clear_top(doc, column, section)
     # (kind, family, [loop centerlines], [tie centerlines]) per family
     groups = {}
-    for poly in design["stirrups"]:
-        kind, family = column_spec.family_of(poly)
+    for drawn_kind, poly in design["stirrups"]:
+        kind, family = column_spec.family_of(drawn_kind)
         entry = groups.setdefault(kind, (family, [], []))
         entry[1].append(spec.stirrup_centerline(poly, design["bars"], family.key))
-    for a, b in design["ties"]:
-        family = column_spec.confinement
-        entry = groups.setdefault(CONFINEMENT, (family, [], []))
+    for drawn_kind, a, b in design["ties"]:
+        kind, family = column_spec.family_of(drawn_kind)
+        entry = groups.setdefault(kind, (family, [], []))
         entry[2].append(spec.tie_centerline(a, b, design["bars"], family.key))
 
     for kind, (family, loops, ties) in groups.items():

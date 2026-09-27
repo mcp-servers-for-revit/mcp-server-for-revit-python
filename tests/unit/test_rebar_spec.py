@@ -97,7 +97,9 @@ class TestDrawing:
         from revit_mcp.rebar_spec import auto_design, stirrup_centerline
 
         design = auto_design(0.30, 0.60, 0.04, '3/8"', parse_longitudinal("8 5/8"))
-        line = stirrup_centerline(design["stirrups"][0], design["bars"], '3/8"')
+        kind, poly = design["stirrups"][0]
+        assert kind == "borde"
+        line = stirrup_centerline(poly, design["bars"], '3/8"')
         xs = [x for x, _ in line]
         # stirrup centerline sits cover + half the stirrup inside the face
         assert max(xs) == pytest.approx(0.15 - 0.04 - 0.009525 / 2)
@@ -122,11 +124,12 @@ class TestDrawing:
 
         design = empty_design()
         design["bars"] = [(0.1, -0.2, '3/4"')]
-        design["stirrups"] = [[(0, 0), (0.1, 0), (0.1, 0.1)]]
-        design["ties"] = [[(0, 0), (0.1, 0.1)]]
+        design["stirrups"] = [("confinamiento", [(0, 0), (0.1, 0), (0.1, 0.1)])]
+        design["ties"] = [("borde", (0, 0), (0.1, 0.1))]
         again = design_from_text(design_to_text(design))
         assert again["bars"] == [(0.1, -0.2, '3/4"')]
-        assert len(again["stirrups"]) == 1 and len(again["ties"]) == 1
+        assert again["stirrups"][0][0] == "confinamiento"
+        assert again["ties"][0][0] == "borde"
         assert design_to_text(empty_design()) == ""
         assert design_from_text("") is None
         with pytest.raises(SpecError):
@@ -148,3 +151,38 @@ def test_edge_vs_confinement_stirrups():
     inner = [(-0.1, -0.3), (0.1, -0.3), (0.1, 0.0), (-0.1, 0.0)]
     assert is_edge_stirrup(outer, bars)
     assert not is_edge_stirrup(inner, bars)
+
+
+def test_first_format_drawings_still_load():
+    from revit_mcp.rebar_spec import design_from_text
+
+    old = ('{"v":1,"bars":[[-0.1,-0.3,"5/8\\""],[0.1,-0.3,"5/8\\""],[0.1,0.3,"5/8\\""],[-0.1,0.3,"5/8\\""]],'
+           '"stirrups":[[[-0.1,-0.3],[0.1,-0.3],[0.1,0.3],[-0.1,0.3]]],"ties":[[[-0.1,0],[0.1,0]]]}')
+    design = design_from_text(old)
+    assert design["stirrups"][0][0] == "borde"  # perimeter one
+    assert design["ties"][0][0] == "confinamiento"
+
+
+class TestAutoTie:
+    bars = [(-0.1, -0.35, '5/8"'), (0.1, -0.35, '5/8"'), (0.1, 0.35, '5/8"'), (-0.1, 0.35, '5/8"'),
+            (-0.1, -0.117, '5/8"'), (0.1, -0.117, '5/8"'), (-0.1, 0.117, '5/8"'), (0.1, 0.117, '5/8"')]
+
+    def test_click_near_middle_pair(self):
+        from revit_mcp.rebar_spec import auto_tie
+
+        a, b = auto_tie((0.02, 0.10), self.bars)
+        assert {a, b} == {(-0.1, 0.117), (0.1, 0.117)}
+
+    def test_never_along_a_face(self):
+        from revit_mcp.rebar_spec import auto_tie
+
+        # click right on the long face: the 4 bars at x=-0.1 are a face,
+        # so the tie still crosses the section
+        a, b = auto_tie((-0.1, 0.0), self.bars)
+        assert abs(a[1] - b[1]) < 1e-9
+
+    def test_no_facing_bars(self):
+        from revit_mcp.rebar_spec import SpecError, auto_tie
+
+        with pytest.raises(SpecError):
+            auto_tie((0, 0), [(0, 0, '5/8"'), (0.1, 0.2, '5/8"')])

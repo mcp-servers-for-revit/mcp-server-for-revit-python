@@ -146,8 +146,11 @@ class AceroWindow(forms.WPFWindow):
 
         self.cbo_conf.ItemsSource = List[str](STIRRUP_DIAMETERS)
         self.cbo_edge.ItemsSource = List[str](STIRRUP_DIAMETERS)
-        self.cbo_bar.ItemsSource = List[str](BAR_DIAMETERS)
-        self.cbo_bar.SelectedItem = u'5/8"'
+        # "Ø acero" of the sketch: which stirrup family a new stirrup/tie
+        # uses, or the diameter of a new longitudinal bar.
+        self.kind_for = {"stirrup": rs.KIND_EDGE, "tie": rs.KIND_CONFINEMENT}
+        self.bar_key = u'5/8"'
+        self._updating_steel = False
         self.levels = sorted(
             DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements(),
             key=lambda lv: lv.ProjectElevation,
@@ -158,6 +161,7 @@ class AceroWindow(forms.WPFWindow):
             state.scope, self.rb_scope_model
         ).IsChecked = True
 
+        self._refresh_steel()
         for t in types:
             self.list_types.Items.Add(self._type_item(t))
         self._refresh_picked()
@@ -369,6 +373,62 @@ class AceroWindow(forms.WPFWindow):
             else u"No hay columnas seleccionadas en el modelo."
         )
 
+    # -- sketch tool and its steel ----------------------------------------
+    def _tool(self):
+        if self.rb_stirrup.IsChecked:
+            return "stirrup"
+        if self.rb_tie.IsChecked:
+            return "tie"
+        if self.rb_bar.IsChecked:
+            return "bar"
+        return "erase"
+
+    def _refresh_steel(self):
+        """Fill "Ø acero" for the current tool: the two stirrup families
+        with the diameters set in "2. Configuracion de estribos", or the
+        longitudinal bar diameters."""
+        tool = self._tool()
+        self._updating_steel = True
+        try:
+            if tool in ("stirrup", "tie"):
+                self.cbo_steel.ItemsSource = List[str]([
+                    u"Confinamiento Ø{}".format(self.cbo_conf.SelectedItem or u'3/8"'),
+                    u"Borde Ø{}".format(self.cbo_edge.SelectedItem or u'3/8"'),
+                ])
+                self.cbo_steel.SelectedIndex = 1 if self.kind_for[tool] == rs.KIND_EDGE else 0
+                self.cbo_steel.IsEnabled = True
+            elif tool == "bar":
+                self.cbo_steel.ItemsSource = List[str]([u"Ø" + k for k in BAR_DIAMETERS])
+                self.cbo_steel.SelectedIndex = BAR_DIAMETERS.index(self.bar_key)
+                self.cbo_steel.IsEnabled = True
+            else:
+                self.cbo_steel.ItemsSource = None
+                self.cbo_steel.IsEnabled = False
+        finally:
+            self._updating_steel = False
+
+    def tool_changed(self, sender, args):
+        if not hasattr(self, "kind_for"):
+            return  # fired while the XAML loads
+        self.draft = []
+        self._refresh_steel()
+        self.redraw()
+
+    def steel_changed(self, sender, args):
+        if getattr(self, "_updating_steel", True) or self.cbo_steel.SelectedIndex < 0:
+            return
+        tool = self._tool()
+        if tool in ("stirrup", "tie"):
+            self.kind_for[tool] = rs.KIND_EDGE if self.cbo_steel.SelectedIndex == 1 else rs.KIND_CONFINEMENT
+        elif tool == "bar":
+            self.bar_key = BAR_DIAMETERS[self.cbo_steel.SelectedIndex]
+
+    def stirrup_diameter_changed(self, sender, args):
+        if not hasattr(self, "kind_for"):
+            return
+        self._refresh_steel()
+        self.redraw()
+
     # -- drawing -----------------------------------------------------------
     def _frame(self):
         t = self.by_id.get(self.state.active)
@@ -449,27 +509,36 @@ class AceroWindow(forms.WPFWindow):
                            closed=True, dash=True)
         except Exception:
             pass
-        for poly in self.design["stirrups"]:
-            # Perimeter ("borde", orange) vs confinement (green) stirrup.
-            if rs.is_edge_stirrup(poly, self.design["bars"]):
-                key, color = edge_key, C_STIRRUP
-            else:
-                key, color = conf_key, C_CONFINEMENT
+        def style(kind):
+            # Edge ("borde") steel in orange, confinement in green.
+            if kind == rs.KIND_EDGE:
+                return edge_key, C_STIRRUP
+            return conf_key, C_CONFINEMENT
+
+        for kind, poly in self.design["stirrups"]:
+            key, color = style(kind)
             try:
                 line = rs.stirrup_centerline(poly, self.design["bars"], key)
             except rs.SpecError:
                 line = poly
             self._polyline(frame, line, color, max(2, rs.BAR_DIAMETERS_MM[key] / 1000.0 * scale),
                            closed=True)
-        for a, b in self.design["ties"]:
+        for kind, a, b in self.design["ties"]:
+            key, color = style(kind)
             try:
-                a2, b2 = rs.tie_centerline(a, b, self.design["bars"], conf_key)
+                a2, b2 = rs.tie_centerline(a, b, self.design["bars"], key)
             except rs.SpecError:
                 a2, b2 = a, b
-            self._polyline(frame, [a2, b2], C_CONFINEMENT,
-                           max(2, rs.BAR_DIAMETERS_MM[conf_key] / 1000.0 * scale))
+            self._polyline(frame, [a2, b2], color, max(2, rs.BAR_DIAMETERS_MM[key] / 1000.0 * scale))
         for x, y, key in self.design["bars"]:
             self._dot(frame, x, y, max(3.5, rs.BAR_DIAMETERS_MM[key] / 2000.0 * scale), C_BAR)
+        if self.rb_tie.IsChecked and self.cursor_m:
+            # Preview of the tie a click here would place.
+            try:
+                a, b = rs.auto_tie(self.cursor_m, self.design["bars"])
+                self._polyline(frame, [a, b], C_DRAFT, 2, dash=True)
+            except rs.SpecError:
+                pass
         if self.draft:
             pts = list(self.draft) + ([self.cursor_m] if self.cursor_m else [])
             self._polyline(frame, pts, C_DRAFT, 2)
@@ -501,19 +570,14 @@ class AceroWindow(forms.WPFWindow):
         if self.rb_bar.IsChecked:
             if not on_bar:
                 self._push_undo()
-                self.design["bars"].append((point[0], point[1], self.cbo_bar.SelectedItem or u'5/8"'))
+                self.design["bars"].append((point[0], point[1], self.bar_key))
         elif self.rb_stirrup.IsChecked:
             if len(self.draft) >= 3 and point == self.draft[0]:
                 self._close_stirrup()
             elif not self.draft or point != self.draft[-1]:
                 self.draft.append(point)
         elif self.rb_tie.IsChecked:
-            if not self.draft:
-                self.draft = [point]
-            elif point != self.draft[0]:
-                self._push_undo()
-                self.design["ties"].append([self.draft[0], point])
-                self.draft = []
+            self._place_tie(self.to_m(frame, p))
         elif self.rb_erase.IsChecked:
             self._erase(frame, p)
         self.redraw()
@@ -527,8 +591,22 @@ class AceroWindow(forms.WPFWindow):
 
     def _close_stirrup(self):
         self._push_undo()
-        self.design["stirrups"].append(list(self.draft))
+        self.design["stirrups"].append((self.kind_for["stirrup"], list(self.draft)))
         self.draft = []
+
+    def _place_tie(self, click_m):
+        """One click = one crosstie between the facing bars nearest to it."""
+        try:
+            a, b = rs.auto_tie(click_m, self.design["bars"])
+        except rs.SpecError:
+            forms.alert(u"No hay dos barras enfrentadas cerca de ese punto para la grapa.",
+                        title="Acero")
+            return
+        for _, c, d in self.design["ties"]:
+            if set([c, d]) == set([a, b]):
+                return  # already there
+        self._push_undo()
+        self.design["ties"].append((self.kind_for["tie"], a, b))
 
     def _erase(self, frame, p):
         """Remove the bar, tie or stirrup nearest to the click."""
@@ -538,9 +616,9 @@ class AceroWindow(forms.WPFWindow):
         candidates = []
         for i, (x, y, _) in enumerate(self.design["bars"]):
             candidates.append((((x - m[0]) ** 2 + (y - m[1]) ** 2) ** 0.5, "bars", i))
-        for i, (a, b) in enumerate(self.design["ties"]):
+        for i, (_, a, b) in enumerate(self.design["ties"]):
             candidates.append((rs.distance_to_polygon(m, [a, b]), "ties", i))
-        for i, poly in enumerate(self.design["stirrups"]):
+        for i, (_, poly) in enumerate(self.design["stirrups"]):
             candidates.append((rs.distance_to_polygon(m, poly), "stirrups", i))
         candidates = [c for c in candidates if c[0] <= tol]
         if candidates:

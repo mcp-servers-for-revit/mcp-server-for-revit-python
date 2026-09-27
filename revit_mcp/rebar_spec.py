@@ -249,7 +249,12 @@ def layout_rectangular_bars(b, h, cover, stirrup_diameter, groups):
 # through the centers of the bars they wrap, and crossties (grapas) from
 # one bar center to another.
 
-DESIGN_VERSION = 1
+DESIGN_VERSION = 2
+# Each drawn stirrup/crosstie belongs to one stirrup family, chosen when
+# sketching: the edge ("borde") or the confinement settings.
+KIND_EDGE = u"borde"
+KIND_CONFINEMENT = u"confinamiento"
+KINDS = (KIND_EDGE, KIND_CONFINEMENT)
 
 
 def empty_design():
@@ -263,12 +268,31 @@ def design_to_text(design):
     data = {
         "v": DESIGN_VERSION,
         "bars": [[r(x), r(y), key] for x, y, key in design.get("bars", [])],
-        "stirrups": [[[r(x), r(y)] for x, y in poly] for poly in design.get("stirrups", [])],
-        "ties": [[[r(x), r(y)] for x, y in tie] for tie in design.get("ties", [])],
+        "stirrups": [
+            {"k": kind, "p": [[r(x), r(y)] for x, y in poly]}
+            for kind, poly in design.get("stirrups", [])
+        ],
+        "ties": [
+            {"k": kind, "p": [[r(a[0]), r(a[1])], [r(b[0]), r(b[1])]]}
+            for kind, a, b in design.get("ties", [])
+        ],
     }
     if not (data["bars"] or data["stirrups"] or data["ties"]):
         return u""
     return json.dumps(data, separators=(",", ":"))
+
+
+def _kind_and_points(entry, default_kind):
+    """(kind, points) of a saved stirrup/tie: {"k", "p"}, or a bare point
+    list from the first format (kind unknown -> `default_kind`)."""
+    if isinstance(entry, dict):
+        kind = entry.get("k")
+        points = entry.get("p", [])
+    else:
+        kind, points = default_kind, entry
+    if kind not in KINDS:
+        kind = default_kind
+    return kind, [(float(x), float(y)) for x, y in points]
 
 
 def design_from_text(text):
@@ -282,14 +306,21 @@ def design_from_text(text):
             if key not in BAR_DIAMETERS_MM:
                 raise SpecError(u"Diametro desconocido en el dibujo: {}".format(key))
             design["bars"].append((float(x), float(y), key))
-        for poly in data.get("stirrups", []):
-            if len(poly) >= 3:
-                design["stirrups"].append([(float(x), float(y)) for x, y in poly])
-        for tie in data.get("ties", []):
-            if len(tie) == 2:
-                design["ties"].append([(float(x), float(y)) for x, y in tie])
+        for entry in data.get("stirrups", []):
+            kind, points = _kind_and_points(entry, None)
+            if len(points) >= 3:
+                design["stirrups"].append((kind, points))
+        for entry in data.get("ties", []):
+            kind, points = _kind_and_points(entry, KIND_CONFINEMENT)
+            if len(points) == 2:
+                design["ties"].append((kind, points[0], points[1]))
+        # Stirrups of the first format: perimeter ones are edge stirrups.
+        design["stirrups"] = [
+            (kind or (KIND_EDGE if is_edge_stirrup(poly, design["bars"]) else KIND_CONFINEMENT), poly)
+            for kind, poly in design["stirrups"]
+        ]
         return design
-    except (ValueError, TypeError, KeyError):
+    except (ValueError, TypeError, KeyError, AttributeError):
         raise SpecError(u"El dibujo guardado esta danado; vuelve a dibujarlo")
 
 
@@ -405,7 +436,7 @@ def auto_design(b, h, cover, stirrup_key, groups):
     bars = layout_rectangular_bars(b, h, cover, ds, groups)
     design = empty_design()
     design["bars"] = [(x, y, k) for x, y, k in bars]
-    design["stirrups"] = [[(x, y) for x, y, _ in bars[:4]]]
+    design["stirrups"] = [(KIND_EDGE, [(x, y) for x, y, _ in bars[:4]])]
     return design
 
 
@@ -432,3 +463,31 @@ def is_edge_stirrup(polygon, bars, tol=0.005):
         if not (point_in_polygon((x, y), polygon) or distance_to_polygon((x, y), polygon) <= tol):
             return False
     return True
+
+
+def auto_tie(click, bars, tol=0.01):
+    """Crosstie for a single click: the pair of facing bars (the only two
+    bars on a horizontal or vertical line of the section, so the tie
+    crosses it from face to face) whose segment passes closest to the
+    click. Returns (start, end) bar centers; SpecError if no pair."""
+    best = None
+    for i, (x1, y1, _) in enumerate(bars):
+        for x2, y2, _ in bars[i + 1:]:
+            if abs(y1 - y2) <= tol:
+                axis = 1  # same y: tie along x
+            elif abs(x1 - x2) <= tol:
+                axis = 0  # same x: tie along y
+            else:
+                continue
+            on_line = [
+                b for b in bars
+                if abs((b[1] - y1) if axis == 1 else (b[0] - x1)) <= tol
+            ]
+            if len(on_line) != 2:
+                continue  # a row of 3+ bars is a face, not a crossing
+            d = distance_to_polygon(click, [(x1, y1), (x2, y2)])
+            if best is None or d < best[0]:
+                best = (d, (x1, y1), (x2, y2))
+    if best is None:
+        raise SpecError(u"No hay dos barras enfrentadas para la grapa")
+    return best[1], best[2]
