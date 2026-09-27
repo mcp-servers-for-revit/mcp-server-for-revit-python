@@ -135,14 +135,23 @@
                     <!-- Longitudinal bars: pick a diameter, then click in the plan -->
                     <TextBlock Text="Barras: " FontWeight="Bold" VerticalAlignment="Center"
                                ToolTip="Elige el di&#225;metro y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior)."/>
-                    <RadioButton x:Name="rb_bar_1" GroupName="tool" Content="&#216; 1/2&quot;" Margin="4,0,10,0"
+                    <!-- Four bar options, each with its own diameter (editable, remembered) -->
+                    <RadioButton x:Name="rb_bar_1" GroupName="tool" Content="&#216;" Margin="4,0,2,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
-                    <RadioButton x:Name="rb_bar_2" GroupName="tool" Content="&#216; 5/8&quot;" Margin="0,0,10,0"
+                    <ComboBox x:Name="cbo_bar_1" Width="62" Margin="0,0,8,0" SelectionChanged="bar_slot_changed"
+                              ToolTip="Diametro de esta opcion: elige el que uses; se recuerda la proxima vez."/>
+                    <RadioButton x:Name="rb_bar_2" GroupName="tool" Content="&#216;" Margin="0,0,2,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
-                    <RadioButton x:Name="rb_bar_3" GroupName="tool" Content="&#216; 3/4&quot;" Margin="0,0,10,0"
+                    <ComboBox x:Name="cbo_bar_2" Width="62" Margin="0,0,8,0" SelectionChanged="bar_slot_changed"
+                              ToolTip="Diametro de esta opcion: elige el que uses; se recuerda la proxima vez."/>
+                    <RadioButton x:Name="rb_bar_3" GroupName="tool" Content="&#216;" Margin="0,0,2,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
-                    <RadioButton x:Name="rb_bar_4" GroupName="tool" Content="&#216; 1&quot;" Margin="0,0,10,0"
+                    <ComboBox x:Name="cbo_bar_3" Width="62" Margin="0,0,8,0" SelectionChanged="bar_slot_changed"
+                              ToolTip="Diametro de esta opcion: elige el que uses; se recuerda la proxima vez."/>
+                    <RadioButton x:Name="rb_bar_4" GroupName="tool" Content="&#216;" Margin="0,0,2,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
+                    <ComboBox x:Name="cbo_bar_4" Width="62" Margin="0,0,8,0" SelectionChanged="bar_slot_changed"
+                              ToolTip="Diametro de esta opcion: elige el que uses; se recuerda la proxima vez."/>
                 </WrapPanel>
                 <TextBlock DockPanel.Dock="Top" x:Name="txt_status" Foreground="#FFC0392B" FontWeight="Bold"
                            TextWrapping="Wrap" Margin="0,0,0,4" Visibility="Collapsed"/>
@@ -170,7 +179,7 @@
                     </WrapPanel>
                 </Border>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
-                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barras: elige el di&#225;metro (1/2&quot;, 5/8&quot;, 3/4&quot; o 1&quot;) y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior); Borrar quita una barra. Los puntos se ajustan a las barras y a 1 cm. Forma: clic en una forma de armadura (panel derecho) y dibuja el estribo; se crea con esa forma. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
+                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barras: elige una de las 4 opciones (el di&#225;metro de cada una se cambia en su lista y se recuerda) y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior); Borrar quita una barra. Los puntos se ajustan a las barras y a 1 cm. Forma: clic en una forma de armadura (panel derecho) y dibuja el estribo; se crea con esa forma. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
                 <!-- Three views: 3D (large, left), elevation and plan (the sketch). Mouse wheel
                      zooms, middle button drag pans, "Ajustar" refits; in 3D a
                      left drag orbits. -->

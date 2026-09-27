@@ -142,6 +142,19 @@ def test_weight_table_matches_the_supplier_table():
     assert bar_weight_kg_per_m('1/4"') == pytest.approx(0.249, abs=0.001)
 
 
+def test_a_diameter_added_to_the_table_becomes_known(tmp_path, monkeypatch):
+    import revit_mcp.rebar_spec as rs
+
+    monkeypatch.setattr(rs, "BAR_DIAMETERS_MM", dict(rs.BAR_DIAMETERS_MM))
+    table_file = tmp_path / "pesos.csv"
+    table_file.write_text(u'DIAMETRO;AREA;NOMINAL;MINIMO\n7/8";387;3.04;2.86\n', encoding="utf-8")
+    table = rs.read_weight_table(str(table_file))
+    assert table['7/8"']["nominal"] == 3.04
+    assert rs.parse_diameter(u"Ø7/8") == '7/8"'
+    assert rs.BAR_DIAMETERS_MM['7/8"'] == pytest.approx(22.2, abs=0.05)
+    assert '7/8"' in rs.bar_diameter_keys()
+
+
 @pytest.mark.parametrize(
     "name, key",
     [

@@ -53,6 +53,33 @@ doc = revit.doc
 
 COLUMNS_BIC = DB.BuiltInCategory.OST_StructuralColumns
 STIRRUP_DIAMETERS = [u"6mm", u"8mm", u'1/4"', u'3/8"', u"12mm", u'1/2"']
+BAR_SLOT_DEFAULTS = [u'1/2"', u'5/8"', u'3/4"', u'1"']  # the four "Barras" options
+
+
+def load_bar_slots():
+    """The diameters of the four "Barras" options the user chose last time
+    (pyRevit settings of this button), else the defaults."""
+    try:
+        saved = script.get_config().get_option("bar_slots", u"") or u""
+        keys = [rs.parse_diameter(k) for k in saved.split(u"|") if k.strip()]
+        if len(keys) == len(BAR_SLOT_DEFAULTS):
+            return keys
+    except Exception:
+        pass
+    return list(BAR_SLOT_DEFAULTS)
+
+
+def save_bar_slots(keys):
+    """Remember the four diameters (inches written 'pulg': no quotes in the
+    settings file)."""
+    try:
+        config = script.get_config()
+        config.bar_slots = u"|".join((k or u"").replace(u'"', u"pulg") for k in keys)
+        script.save_config()
+    except Exception:
+        pass
+
+
 SNAP_PX = 12  # a click this close to a bar snaps to it
 MARGIN_PX = 30
 
@@ -227,9 +254,16 @@ class AceroWindow(forms.WPFWindow):
         # uses. A new longitudinal bar takes the diameter of the "Barras"
         # option chosen.
         self.kind_for = {"stirrup": rs.KIND_EDGE, "tie": rs.KIND_CONFINEMENT}
-        self.bar_tools = [(self.rb_bar_1, u'1/2"'), (self.rb_bar_2, u'5/8"'),
-                          (self.rb_bar_3, u'3/4"'), (self.rb_bar_4, u'1"')]
-        self.bar_key = u'5/8"'
+        # "Barras": four options, each with the diameter chosen in its own
+        # list (remembered in the user's pyRevit settings).
+        self.bar_tools = [(self.rb_bar_1, self.cbo_bar_1), (self.rb_bar_2, self.cbo_bar_2),
+                          (self.rb_bar_3, self.cbo_bar_3), (self.rb_bar_4, self.cbo_bar_4)]
+        self._filling_bars = True
+        for (rb, cbo), key in zip(self.bar_tools, load_bar_slots()):
+            cbo.ItemsSource = List[str](rs.bar_diameter_keys())
+            cbo.SelectedItem = key
+        self._filling_bars = False
+        self.bar_key = self.cbo_bar_2.SelectedItem
         self._updating_steel = False
         self.selected = None  # index of the stirrup whose measures are shown
         # Plan / elevation / 3D views: zoom-pan state and what they last showed.
@@ -610,13 +644,28 @@ class AceroWindow(forms.WPFWindow):
             return  # fired while the XAML loads
         self.draft = []
         self._status()  # the previous tool's hint ("...para la grapa") no longer applies
-        for rb, key in self.bar_tools:
-            if rb.IsChecked:
-                self.bar_key = key
+        for rb, cbo in self.bar_tools:
+            if rb.IsChecked and cbo.SelectedItem:
+                self.bar_key = cbo.SelectedItem
         if self._tool() not in ("edit",):
             self.selected = None if self._tool() == "erase" else self.selected
         self._refresh_steel()
         self.redraw()
+
+    def bar_slot_changed(self, sender, args):
+        """A diameter chosen in one of the four "Barras" options: it is
+        remembered, and that option becomes the bar tool."""
+        if getattr(self, "_filling_bars", True):
+            return
+        save_bar_slots([cbo.SelectedItem for _, cbo in self.bar_tools])
+        for rb, cbo in self.bar_tools:
+            if cbo is not sender or not cbo.SelectedItem:
+                continue
+            if rb.IsChecked:
+                self.bar_key = cbo.SelectedItem
+                self._refresh_steel()
+            else:
+                rb.IsChecked = True  # tool_changed takes its diameter
 
     def steel_changed(self, sender, args):
         if getattr(self, "_updating_steel", True) or self.cbo_steel.SelectedIndex < 0:

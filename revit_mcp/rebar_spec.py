@@ -43,7 +43,9 @@ class SpecError(ValueError):
 def read_weight_table(path=WEIGHT_TABLE_FILE):
     """{diameter key: {"area_mm2", "nominal", "minimum"}} (kg/m) from the
     weight table: 'DIAMETRO;AREA_NOMINAL_MM2;PESO_NOMINAL_KG_M;PESO_MINIMO_KG_M'
-    lines, '#' comments and the header skipped."""
+    lines, '#' comments and the header skipped. A diameter the plugin
+    doesn't know yet (a 7/8" row added to the table) becomes a known bar,
+    its diameter taken from its nominal area."""
     table = {}
     with io.open(path, encoding="utf-8") as f:
         for number, line in enumerate(f, 1):
@@ -52,13 +54,17 @@ def read_weight_table(path=WEIGHT_TABLE_FILE):
                 continue
             cells = [c.strip() for c in line.split(u";")]
             try:
-                table[parse_diameter(cells[0])] = {
+                key = _diameter_key(cells[0])
+                row = {
                     "area_mm2": float(cells[1]),
                     "nominal": float(cells[2]),
                     "minimum": float(cells[3]),
                 }
             except (IndexError, ValueError):
                 raise SpecError(u"Tabla de pesos, linea {}: no se entiende '{}'".format(number, line))
+            if key not in BAR_DIAMETERS_MM:
+                BAR_DIAMETERS_MM[key] = round(math.sqrt(4.0 * row["area_mm2"] / math.pi), 2)
+            table[key] = row
     return table
 
 
@@ -127,23 +133,33 @@ def _clean(text):
     return re.sub(r"\s+", u" ", t).strip()
 
 
-def parse_diameter(text):
-    """'5/8"', 'Ø5/8', '5/8 pulg', '1 3/8"', '12mm', '8 mm' -> a
-    BAR_DIAMETERS_MM key."""
+def _diameter_key(text):
+    """'5/8"', 'Ø5/8', '5/8 pulg', '1 3/8"', '12mm', '8 mm' -> the key
+    form ('5/8"', '12mm'), known or not."""
     t = _clean(text)
     m = re.match(r"^(\d+(?:\.\d+)?)\s*mm$", t)
     if m:
-        key = u"{}mm".format(m.group(1).rstrip("0").rstrip(".") if "." in m.group(1) else m.group(1))
-        if key in BAR_DIAMETERS_MM:
-            return key
-        raise SpecError(u"Diametro no reconocido: {}".format(text))
+        return u"{}mm".format(m.group(1).rstrip("0").rstrip(".") if "." in m.group(1) else m.group(1))
     t = re.sub(r'\s*(pulg|in|")\s*$', u"", t).replace(u"-", u" ").strip()
-    key = t + u'"'
+    return t + u'"'
+
+
+def parse_diameter(text):
+    """'5/8"', 'Ø5/8', '5/8 pulg', '1 3/8"', '12mm', '8 mm' -> a
+    BAR_DIAMETERS_MM key."""
+    key = _diameter_key(text)
     if key in BAR_DIAMETERS_MM:
         return key
     raise SpecError(
-        u'Diametro no reconocido: "{}" (usa 3/8", 1/2", 5/8", 3/4", 1", 8mm, 12mm...)'.format(text)
+        u'Diametro no reconocido: "{}" (usa 3/8", 1/2", 5/8", 3/4", 1", 8mm, 12mm... '
+        u'o agregalo a la tabla de pesos)'.format(text)
     )
+
+
+def bar_diameter_keys():
+    """Every known bar diameter, thinnest first (the weight table's ones
+    included)."""
+    return sorted(BAR_DIAMETERS_MM, key=lambda k: BAR_DIAMETERS_MM[k])
 
 
 def parse_longitudinal(text):
@@ -1133,3 +1149,10 @@ def bar_seat(click, stirrup_outline, stirrup_key, bar_key, snap=BAR_SEAT_SNAP):
         return None
     found = _nearest_seat(click, seats, snap)
     return found[1] if found else None
+
+
+# The diameters the weight table adds are known from the start (parse_diameter).
+try:
+    weight_table()
+except (IOError, OSError, SpecError):
+    pass
