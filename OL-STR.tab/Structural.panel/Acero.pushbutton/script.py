@@ -465,6 +465,10 @@ class AceroWindow(forms.WPFWindow):
         return (round(x, 2), round(y, 2)), False
 
     def _add(self, shape):
+        # Shapes never take the mouse: clicks go straight to the canvas,
+        # and a shape redrawn under a still cursor can't set off another
+        # MouseMove (a redraw loop that swallowed the clicks).
+        shape.IsHitTestVisible = False
         self.canvas.Children.Add(shape)
         return shape
 
@@ -558,7 +562,10 @@ class AceroWindow(forms.WPFWindow):
         frame = self._frame()
         if frame is None:
             return
-        self.cursor_m, _ = self.snap(frame, args.GetPosition(self.canvas))
+        cursor, _ = self.snap(frame, args.GetPosition(self.canvas))
+        if cursor == self.cursor_m:
+            return  # same snapped point: nothing to redraw
+        self.cursor_m = cursor
         self.redraw()
 
     def canvas_left(self, sender, args):
