@@ -953,23 +953,25 @@ STIRRUP_MERGE_GAP = 0.01  # two stirrups closer than this are one
 
 def stirrup_sets(length, zones, rest):
     """The stirrup sets of a clear length, in order from the bottom, as
-    they are placed on site ('1@.05, 5@.10, rto@.20'):
-    - at each end every zone is its own set, measured from that end: 1
-      stirrup at 0.05 (a single one), then 5 at 0.10 counted from it
-      (0.15 ... 0.55); the top zones mirror the bottom ones;
-    - the rest is one set in the middle, every `rest` from the last stirrup
-      of the bottom zones up to the top zones (the last gap, before them,
-      the leftover).
+    they are placed on site ('1@.05, 5@.10, rto@.20'), everything measured
+    from each end towards the middle, the top mirroring the bottom:
+    - every zone is its own set: 1 stirrup at 0.05 (a single one), then 5
+      at 0.10 counted from it (0.15 ... 0.55);
+    - the rest, a set from each end every `rest` counted from the last
+      stirrup of that end's zones (0.75, 0.95 ...), up to the middle;
+    - the leftover gap is in the middle: one more stirrup there when it is
+      wider than `rest`, and just one where the two ends meet on the same
+      spot.
     Zones that don't fit in a short column stop at its middle.
     Returns [(start, count, spacing, zone_index, side)]: zone_index the
     position in `zones` or len(zones) for the rest; side +1 for the bottom
-    zones and the rest, -1 for the top zones (see rc._runs)."""
+    half, -1 for the top half (see rc._runs)."""
     if length <= 0:
         return []
     rest_zone = len(zones)
     half = length / 2.0
     eps = 1e-6
-    bottom = []  # [(offset, zone)] of the bottom end zones, up to the middle
+    bottom = []  # [(offset, zone)] of the bottom half
     z = 0.0
     for index, (count, spacing) in enumerate(zones):
         for _ in range(count):
@@ -977,18 +979,17 @@ def stirrup_sets(length, zones, rest):
                 break
             z += spacing
             bottom.append((z, index))
-    top = [(length - p, zone) for p, zone in reversed(bottom)]
-    if bottom and top[0][0] - bottom[-1][0] < STIRRUP_MERGE_GAP:
-        top = top[1:]  # both ends reach the same middle spot: one stirrup there
-    low = bottom[-1][0] if bottom else 0.0
-    high = top[0][0] if top else length
-    middle = []
-    z = low + rest
-    while z < high - STIRRUP_MERGE_GAP:
-        middle.append(z)
+    while z + rest <= half + eps:
         z += rest
-    if not bottom and not middle:
-        middle = [half]
+        bottom.append((z, rest_zone))
+    top = [(length - p, zone) for p, zone in reversed(bottom)]
+    middle = []
+    if not bottom:
+        middle = [(half, rest_zone)]
+    elif top[0][0] - bottom[-1][0] < STIRRUP_MERGE_GAP:
+        top = top[1:]  # both ends reach the same middle spot: one stirrup there
+    elif top[0][0] - bottom[-1][0] > rest + eps:
+        middle = [(half, rest_zone)]  # the leftover in the middle, never wider than rest
 
     sets = []
 
@@ -1004,8 +1005,7 @@ def stirrup_sets(length, zones, rest):
             i = j + 1
 
     add_zones(bottom, 1)
-    if middle:
-        sets.append((middle[0], len(middle), rest if len(middle) > 1 else 0.0, rest_zone, 1))
+    add_zones(middle, 1)
     add_zones(top, -1)
     return sets
 

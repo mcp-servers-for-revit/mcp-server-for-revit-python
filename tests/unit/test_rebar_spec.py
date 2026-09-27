@@ -47,12 +47,12 @@ class TestParsing:
 
 
 class TestStirrups:
-    def test_end_zones_mirror_each_other(self):
+    def test_both_ends_mirror_each_other(self):
         pos = stirrup_positions(2.65, [(1, 0.05), (10, 0.10)], 0.20)
         assert len(pos) == 24
         assert pos[0] == pytest.approx(0.05)
         assert pos[-1] == pytest.approx(2.60)
-        for a, b in zip(pos[:11], reversed(pos[-11:])):
+        for a, b in zip(pos, reversed(pos)):
             assert a + b == pytest.approx(2.65)
 
     def test_one_set_per_zone_and_end_as_written(self):
@@ -62,7 +62,8 @@ class TestStirrups:
         expected = [
             (0.05, 1, 0.0, 0, 1),     # 1@0.05: a single stirrup
             (0.15, 5, 0.10, 1, 1),    # 5@0.10 counted from it
-            (0.75, 14, 0.20, 2, 1),   # rto@0.20 from the last of 5@0.10 (0.75 ... 3.35)
+            (0.75, 7, 0.20, 2, 1),    # rto@0.20 up from the last of 5@0.10 (0.75 ... 1.95)
+            (2.05, 7, 0.20, 2, -1),   # rto@0.20 down from the top 5@0.10 (3.25 ... 2.05)
             (3.45, 5, 0.10, 1, -1),   # 5@0.10 at the top (3.45 ... 3.85)
             (3.95, 1, 0.0, 0, -1),    # 1@0.05 under the beam
         ]
@@ -82,10 +83,13 @@ class TestStirrups:
         gaps = [b - a for a, b in zip(pos, pos[1:])]
         assert max(gaps) <= rest + STIRRUP_MERGE_GAP + 1e-9
         assert min(gaps) >= STIRRUP_MERGE_GAP - 1e-9  # two stirrups never on the same spot
-        # the rest runs every 0.20 from the last stirrup of 5@0.10
-        middle = [p for p in pos if 0.55 + 1e-6 < p < length - 0.55 - 1e-6]
-        for k, p in enumerate(middle):
-            assert p == pytest.approx(0.55 + 0.20 * (k + 1))
+        # the rest runs every 0.20 from the last stirrup of 5@0.10 of each
+        # end (a stirrup right at the middle only fills the leftover)
+        for p in pos:
+            d = min(p, length - p)  # from the nearer end
+            if d > 0.55 + 1e-6 and abs(p - length / 2.0) > 1e-6:
+                k = (d - 0.55) / 0.20
+                assert k == pytest.approx(round(k))
 
     def test_short_column_zones_stop_at_the_middle(self):
         pos = stirrup_positions(0.9, [(1, 0.05), (5, 0.10)], 0.20)
