@@ -243,7 +243,7 @@ class AceroWindow(forms.WPFWindow):
         self._clear_cache = {}
         self._neighbor_cache = {}  # column id -> elements touching it
         self._section_cache = {}  # column id -> rc.Section
-        self._view_column = None  # the column the 3D view and elevation show
+        self._view_columns = []  # the column(s), stacked, the 3D view and elevation show
         self._filling_columns = False
 
         self._refresh_steel()
@@ -832,7 +832,7 @@ class AceroWindow(forms.WPFWindow):
                 self.cursor_m, self.cursor_on_bar) is None
             self._dot(frame, self.cursor_m[0], self.cursor_m[1], 4 if refused else 3,
                       C_REFUSED if refused else C_CURSOR)
-        signature = (self.state.active, id_of(self._view_column.Id) if self._view_column else None,
+        signature = (self.state.active, tuple(id_of(c.Id) for c in self._view_columns),
                      rs.design_to_text(self.design),
                      tuple(sorted(self._get_form().items())))
         if signature != self._views_sig:
@@ -1165,15 +1165,22 @@ class AceroWindow(forms.WPFWindow):
 
     def _fill_view_columns(self, t):
         """List the type's columns for the 3D view / elevation, each with
-        what it touches. First choice: the column picked in the model,
-        else the first one a beam frames into, else the first one."""
+        what it touches; with two or more of them picked in the model, first
+        an entry showing those stacked. First choice: the picked ones (all
+        of them), else the first one a beam frames into, else the first."""
         self._filling_columns = True
         try:
-            labels = []
-            picked_at = beam_at = None
+            labels, options = [], []
+            beam_at = None
             picked = set(self.state.picked_ids)
-            for index, column in enumerate(t.columns):
-                level = doc.GetElement(column.LevelId)
+            stack = sorted([c for c in t.columns if id_of(c.Id) in picked],
+                           key=lambda c: self._column_info(c, t.section)[0].z_bottom
+                           if t.section is not None else 0)
+            if len(stack) > 1:
+                labels.append(u"Las {} seleccionadas, apiladas ({})".format(
+                    len(stack), u", ".join(self._level_name(c) for c in stack)))
+                options.append(stack)
+            for column in t.columns:
                 kinds = []
                 if t.section is not None:
                     for n in self._column_info(column, t.section)[2]:
@@ -1181,27 +1188,34 @@ class AceroWindow(forms.WPFWindow):
                         if name not in kinds:
                             kinds.append(name)
                 labels.append(u"{} - {}{}".format(
-                    id_of(column.Id), level.Name if level else u"sin nivel",
+                    id_of(column.Id), self._level_name(column),
                     u"  ({})".format(u", ".join(kinds)) if kinds else u""))
-                if picked_at is None and id_of(column.Id) in picked:
-                    picked_at = index
+                options.append([column])
                 if beam_at is None and u"viga" in kinds:
-                    beam_at = index
-            default = next(i for i in (picked_at, beam_at, 0) if i is not None)
+                    beam_at = len(options) - 1
+            if stack:
+                default = 0 if len(stack) > 1 else options.index([stack[0]])
+            else:
+                default = beam_at or 0
+            self._view_options = options
             self.cbo_view_column.ItemsSource = List[str](labels)
             self.cbo_view_column.SelectedIndex = default
-            self._view_column = t.columns[default]
+            self._view_columns = options[default]
         finally:
             self._filling_columns = False
+
+    def _level_name(self, column):
+        level = doc.GetElement(column.LevelId)
+        return level.Name if level else u"sin nivel"
 
     def view_column_changed(self, sender, args):
         if getattr(self, "_filling_columns", True):
             return
-        t = self.by_id.get(self.state.active)
         index = self.cbo_view_column.SelectedIndex
-        if t is None or index < 0 or index >= len(t.columns):
+        options = getattr(self, "_view_options", [])
+        if index < 0 or index >= len(options):
             return
-        self._view_column = t.columns[index]
+        self._view_columns = options[index]
         self.elev_nav.reset()
         self.scene._extent = None
         self._views_sig = None  # force the views to redraw for this column
@@ -1230,68 +1244,82 @@ class AceroWindow(forms.WPFWindow):
         t = self.by_id.get(self.state.active)
         if t is None or t.section is None:
             return None, None
-        # The column chosen in "Columna:" (each has its own height and
-        # its own beams, slab and footing).
-        column = self._view_column if self._view_column in t.columns else t.columns[0]
-        section, clear, neighbors = self._column_info(column, t.section)
-        height = (section.z_top - section.z_bottom) * rc.FT
+        # The column(s) chosen in "Columna:" (each has its own height and
+        # its own beams, slab and footing); several are drawn stacked, in
+        # the frame of the lowest one.
+        columns = [c for c in self._view_columns if c in t.columns] or t.columns[:1]
         f = self._get_form()
-        edge, edge_msg = self._family_view(f["edge"], f["edge_dist"], clear)
-        conf, conf_msg = self._family_view(f["conf"], f["conf_dist"], clear)
-        joint = []
-        if f["nucleo"] and height - clear > 0.1:
-            try:
-                joint = rs.joint_positions(height - clear, float(f["nucleo"].replace(u",", u".")) / 100.0)
-            except ValueError:
-                pass
-        message = None
-        if edge_msg:
-            message = u"Borde: " + edge_msg
-        elif conf_msg:
-            message = u"Confinamiento: " + conf_msg
-        elif edge is None:
-            message = u"Falta la distribucion del estribo de borde"
         bars = self.design["bars"]
-        xs = [p[0] for p in section.polygon_m]
+        base = self._column_info(columns[0], t.section)[0]
+        to_base = base.transform.Inverse
+        segments, neighbors, loops = [], [], []
+        messages = []
+        for index, column in enumerate(columns):
+            section, clear, touching = self._column_info(column, t.section)
+            height = (section.z_top - section.z_bottom) * rc.FT
+            origin = to_base.OfPoint(section.point_m(0.0, 0.0, section.z_bottom))
+            dx = (origin.X - base.center[0]) * rc.FT
+            dy = (origin.Y - base.center[1]) * rc.FT
+            dz = (section.z_bottom - base.z_bottom) * rc.FT
+            edge, edge_msg = self._family_view(f["edge"], f["edge_dist"], clear)
+            conf, conf_msg = self._family_view(f["conf"], f["conf_dist"], clear)
+            joint = []
+            if f["nucleo"] and height - clear > 0.1:
+                try:
+                    joint = rs.joint_positions(height - clear, float(f["nucleo"].replace(u",", u".")) / 100.0)
+                except ValueError:
+                    pass
+            messages += [m for m in (edge_msg and u"Borde: " + edge_msg,
+                                     conf_msg and u"Confinamiento: " + conf_msg) if m]
+            if edge is None and not edge_msg:
+                messages.append(u"Falta la distribucion del estribo de borde")
+            segments.append({"x": dx, "y": dy, "z": dz, "height": height, "clear": clear,
+                             "edge": edge, "conf": conf, "joint": joint})
+            for n in touching:
+                x0, y0, z0, x1, y1, z1 = n["box"]
+                neighbors.append({
+                    "label": n["label"], "seg": index,
+                    "box": (x0 + dx, y0 + dy, z0 + dz, x1 + dx, y1 + dy, z1 + dz),
+                    "triangles": [tuple((p[0] + dx, p[1] + dy, p[2] + dz) for p in tri)
+                                  for tri in n["triangles"]],
+                })
+            families = {rs.KIND_EDGE: edge, rs.KIND_CONFINEMENT: conf}
+            drawn = [(kind, poly, wrap, is_open) for kind, poly, wrap, is_open in self.design["stirrups"]]
+            drawn += [(kind, [a, b], None, None) for kind, a, b in self.design["ties"]]
+            for kind, poly, wrap, is_open in drawn:
+                family = families.get(kind)
+                if family is None:
+                    continue
+                try:
+                    if is_open is None:  # a tie
+                        line, closed = list(rs.tie_centerline(poly[0], poly[1], bars, family["key"])), False
+                    else:
+                        line = rs.stirrup_centerline(poly, bars, family["key"], wrap, is_open)
+                        closed = not is_open
+                except rs.SpecError:
+                    continue
+                zs = [dz + z for z, _ in family["tagged"]] + [dz + clear + j for j in joint]
+                loops.append((kind, [(x + dx, y + dy) for x, y in line], closed, zs,
+                              rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
+        top = max(s["z"] + s["height"] for s in segments)
+        xs = [p[0] for p in base.polygon_m]
         elev = {
             "width": max(xs) - min(xs),
-            "height": height,
-            "clear": clear,
+            "height": top,
             "bars_x": sorted(set(round(x, 3) for x, _, _ in bars)),
-            "edge": edge,
-            "conf": conf,
-            "joint": joint,
-            "message": message,
+            "message": messages[0] if messages else None,
             "neighbors": neighbors,
+            "segments": segments,
         }
-        loops = []
-        families = {rs.KIND_EDGE: edge, rs.KIND_CONFINEMENT: conf}
-        for kind, poly, wrap, is_open in self.design["stirrups"]:
-            family = families.get(kind)
-            if family is None:
-                continue
-            try:
-                line = rs.stirrup_centerline(poly, bars, family["key"], wrap, is_open)
-            except rs.SpecError:
-                continue
-            zs = [z for z, _ in family["tagged"]] + [clear + j for j in joint]
-            loops.append((kind, line, not is_open, zs, rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
-        for kind, a, b in self.design["ties"]:
-            family = families.get(kind)
-            if family is None:
-                continue
-            try:
-                a2, b2 = rs.tie_centerline(a, b, bars, family["key"])
-            except rs.SpecError:
-                continue
-            zs = [z for z, _ in family["tagged"]] + [clear + j for j in joint]
-            loops.append((kind, [a2, b2], False, zs, rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
+        if len(segments) == 1:  # the single-column keys too
+            elev.update(dict((k, segments[0][k]) for k in ("clear", "edge", "conf", "joint")))
         scene = {
-            "polygon": section.polygon_m,
-            "height": height,
+            "polygon": base.polygon_m,
+            "height": top,
             "bars": [(x, y, rs.BAR_DIAMETERS_MM[k] / 2000.0) for x, y, k in bars],
             "loops": loops,
             "neighbors": neighbors,
+            "segments": segments,
         }
         return elev, scene
 

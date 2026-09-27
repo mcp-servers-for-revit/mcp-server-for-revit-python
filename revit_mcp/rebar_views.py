@@ -228,9 +228,21 @@ def _dimension_layout(data):
     widen = _widen(data)
     half = data["width"] * widen / 2.0
     u = _elevation_unit(data)
-    edge = min([-half - 0.17] + [n["box"][0] * widen for n in data.get("neighbors", [])])
+    edge = min([s["x"] * widen - half - 0.17 for s in _segments(data)]
+               + [n["box"][0] * widen for n in data.get("neighbors", [])])
     x_chain = edge - 1.6 * u
     return edge, x_chain, x_chain - 2.6 * u
+
+
+def _segments(data):
+    """The columns of the drawing, bottom up: several picked columns of one
+    type stacked ("segments": x/y offset and base z from the lowest one, m),
+    or the one column. Each: x, y, z, height, clear, edge, conf, joint."""
+    return data.get("segments") or [{
+        "x": 0.0, "y": 0.0, "z": 0.0, "height": data["height"],
+        "clear": data.get("clear", data["height"]), "edge": data.get("edge"),
+        "conf": data.get("conf"), "joint": data.get("joint", []),
+    }]
 
 
 def _dimension(canvas, frame, x, z0, z1, text, x_from, u, place=0):
@@ -249,8 +261,12 @@ def _dimension(canvas, frame, x, z0, z1, text, x_from, u, place=0):
     probe.FontSize = 10
     probe.Measure(Size(1e4, 1e4))
     length = probe.DesiredSize.Width / scale  # meters along the line
-    if length + 0.3 * u < z1 - z0 or place == 0:
+    if length + 0.3 * u < z1 - z0:
         z = (z0 + z1) / 2.0
+    elif place == 0:
+        # too short in the middle of the chain: beside it, further out
+        _vtext(canvas, frame, x - 0.9 * u, (z0 + z1) / 2.0, text, C_DIM)
+        return
     elif place > 0:
         z = z1 + 0.2 * u + length / 2.0
         _line(canvas, frame, (x, z1), (x, z1 + 0.2 * u + length), C_DIM, 0.8)
@@ -262,11 +278,13 @@ def _dimension(canvas, frame, x, z0, z1, text, x_from, u, place=0):
 
 def _dimensions(canvas, frame, data):
     """Dimensions on the left of the elevation, past the slab/footing: a
-    chain through footing, clear height and the beam/slab over it, plus
-    the column's total height further out."""
-    height, clear = data["height"], data["clear"]
+    chain through footing, clear height and the beam/slab over it (of each
+    stacked column), plus the total height further out."""
+    height = data["height"]
     neighbors = data.get("neighbors", [])
-    marks = [0.0, clear, height]
+    marks = [0.0, height]
+    for s in _segments(data):
+        marks += [s["z"], s["z"] + s["clear"], s["z"] + s["height"]]
     footings = [n["box"][2] for n in neighbors if n["label"] == u"ZAPATA"]
     if footings and min(footings) < -0.01:
         marks.append(min(footings))
@@ -282,8 +300,9 @@ def _dimensions(canvas, frame, data):
     x_from = edge - 0.3 * u  # extension lines start a little off the drawing
     spans = list(zip(levels, levels[1:]))
     for i, (z0, z1) in enumerate(spans):
-        # short spans at the ends write their value outside the chain
-        place = -1 if i == 0 else (1 if i == len(spans) - 1 else 0)
+        # a short span at the top writes its value above the chain; the
+        # others beside it (below would run into the texts at the bottom)
+        place = 1 if i == len(spans) - 1 and i > 0 else 0
         _dimension(canvas, frame, x_chain, z0, z1, u"{:.2f}".format(z1 - z0), x_from, u, place)
     _dimension(canvas, frame, x_total, 0.0, height, u"H = {:.2f}".format(height), x_chain, u)
 
@@ -294,10 +313,12 @@ def _floor(data):
 
 def elevation_extent(data):
     u = _elevation_unit(data)
-    half = data["width"] * _widen(data) / 2.0
+    widen = _widen(data)
+    half = data["width"] * widen / 2.0
     neighbors = data.get("neighbors", [])
     zs = [z for n in neighbors for z in (n["box"][2], n["box"][5])]
-    right = max([half + 0.30] + [n["box"][3] * _widen(data) for n in neighbors])
+    right = max([s["x"] * widen + half + 0.30 for s in _segments(data)]
+                + [n["box"][3] * widen for n in neighbors])
     top = max([data["height"]] + zs) + 1.2 * u
     bottom = _floor(data) - 2.8 * u  # "Luz libre" and the message
     _, _, x_total = _dimension_layout(data)
@@ -311,69 +332,86 @@ def draw_elevation(canvas, data, frame):
 
     `data`: width, height, clear (m, from the base), bars_x [x...], edge /
     conf families {"zones", "rest", "tagged": [(offset, zone)]} or None,
-    joint [offsets above the clear height], message (text or None)."""
+    joint [offsets above the clear height], message (text or None); or,
+    for several stacked columns, "segments" with those per column (see
+    `_segments`) and height the total."""
     canvas.Children.Clear()
     if data is None:
         return
     widen = _widen(data)
-    width, height, clear = data["width"] * widen, data["height"], data["clear"]
-    half = width / 2.0
+    half = data["width"] * widen / 2.0
     neighbors = data.get("neighbors", [])
-    # The elements touching the column, behind it (x widened like the
-    # column), each with its name; the column is drawn over them.
+    segments = _segments(data)
+    # The elements touching the columns, behind them (x widened like the
+    # column), each with its name; the columns are drawn over them.
     for n in neighbors:
         x0, _, z0, x1, _, z1 = n["box"]
         _rect(canvas, frame, x0 * widen, z0, x1 * widen, z1, C_NEIGHBOR, C_NEIGHBOR_EDGE)
-    _rect(canvas, frame, -half, 0.0, half, clear, C_CONCRETE, C_BAR)
-    if height - clear > 1e-3:
-        _rect(canvas, frame, -half, clear, half, height, C_JOINT, C_BAR)
-        if not neighbors:
-            _text(canvas, frame, 0.0, height + 0.06, u"VIGA / NUDO", bold=True)
-    # one name per kind (VIGA, LOSA, ZAPATA), on its biggest piece
+    for s in segments:
+        cx, base = s["x"] * widen, s["z"]
+        clear, top = base + s["clear"], base + s["height"]
+        _rect(canvas, frame, cx - half, base, cx + half, clear, C_CONCRETE, C_BAR)
+        if top - clear > 1e-3:
+            _rect(canvas, frame, cx - half, clear, cx + half, top, C_JOINT, C_BAR)
+            if not neighbors:
+                _text(canvas, frame, cx, top + 0.06, u"VIGA / NUDO", bold=True)
+    # one name per kind (VIGA, LOSA, ZAPATA) and column, on its biggest piece
     biggest = {}
     for n in neighbors:
         x0, _, z0, x1, _, z1 = n["box"]
         area = (x1 - x0) * (z1 - z0)
-        if n["label"] not in biggest or area > biggest[n["label"]][0]:
-            biggest[n["label"]] = (area, n)
+        key = (n["label"], n.get("seg", 0))
+        if key not in biggest or area > biggest[key][0]:
+            biggest[key] = (area, n)
     for _, n in biggest.values():
         x0, _, z0, x1, _, z1 = n["box"]
+        cx = segments[min(n.get("seg", 0), len(segments) - 1)]["x"] * widen
         # name beside the column, on the side the element reaches furthest
-        side = x1 * widen if abs(x1) >= abs(x0) else x0 * widen
-        x = (side + (half if side > 0 else -half)) / 2.0
-        if abs(side) <= half + 1e-6:
-            x = 0.0
+        side = x1 * widen if abs(x1 * widen - cx) >= abs(x0 * widen - cx) else x0 * widen
+        x = (side + (cx + half if side > cx else cx - half)) / 2.0
+        if abs(side - cx) <= half + 1e-6:
+            x = cx
         _text(canvas, frame, x, (z0 + z1) / 2.0, n["label"], brush=C_NEIGHBOR_TEXT, size=10, bold=True)
-    for x in data["bars_x"]:
-        _line(canvas, frame, (x * widen, 0.0), (x * widen, height), C_BAR, 2)
 
-    edge = data.get("edge")
-    if edge:
-        band_x0, band_x1 = -half - 0.17, -half - 0.05
-        runs = _zone_runs(edge["tagged"])
-        for i, (zone, first, last, count) in enumerate(runs):
-            # continuous bands: each one reaches halfway to its neighbours
-            lo = 0.0 if i == 0 else (runs[i - 1][2] + first) / 2.0
-            hi = clear if i == len(runs) - 1 else (last + runs[i + 1][1]) / 2.0
-            _rect(canvas, frame, band_x0, lo, band_x1, hi, ZONE_BRUSHES[zone % len(ZONE_BRUSHES)])
-            _text(canvas, frame, (band_x0 + band_x1) / 2.0, (lo + hi) / 2.0,
-                  u"Z{}".format(zone + 1), size=10, bold=True)
-            if (lo + hi) / 2.0 <= clear / 2.0 + 1e-6:  # spacing written once, bottom half
-                _text(canvas, frame, half + 0.03, (lo + hi) / 2.0, _zone_label(edge, zone),
-                      brush=C_DIM, size=10, anchor="left")
-        for offset, zone in edge["tagged"]:
-            _line(canvas, frame, (-half + 0.01, offset), (half - 0.01, offset), C_EDGE, 2)
-    conf = data.get("conf")
-    if conf:
-        for offset, _ in conf["tagged"]:
-            _line(canvas, frame, (-half * 0.55, offset), (half * 0.55, offset), C_CONF, 1.5, dash=True)
-    for offset in data.get("joint", []):
-        _line(canvas, frame, (-half + 0.01, clear + offset), (half - 0.01, clear + offset), C_EDGE, 2)
+    for s in segments:
+        cx, base = s["x"] * widen, s["z"]
+        clear, top = base + s["clear"], base + s["height"]
+        for x in data["bars_x"]:
+            _line(canvas, frame, (cx + x * widen, base), (cx + x * widen, top), C_BAR, 2)
+        edge = s.get("edge")
+        if edge:
+            band_x0, band_x1 = cx - half - 0.17, cx - half - 0.05
+            runs = _zone_runs(edge["tagged"])
+            for i, (zone, first, last, count) in enumerate(runs):
+                # continuous bands: each one reaches halfway to its neighbours
+                lo = 0.0 if i == 0 else (runs[i - 1][2] + first) / 2.0
+                hi = s["clear"] if i == len(runs) - 1 else (last + runs[i + 1][1]) / 2.0
+                _rect(canvas, frame, band_x0, base + lo, band_x1, base + hi,
+                      ZONE_BRUSHES[zone % len(ZONE_BRUSHES)])
+                _text(canvas, frame, (band_x0 + band_x1) / 2.0, base + (lo + hi) / 2.0,
+                      u"Z{}".format(zone + 1), size=10, bold=True)
+                if (lo + hi) / 2.0 <= s["clear"] / 2.0 + 1e-6:  # spacing written once, bottom half
+                    _text(canvas, frame, cx + half + 0.03, base + (lo + hi) / 2.0, _zone_label(edge, zone),
+                          brush=C_DIM, size=10, anchor="left")
+            for offset, zone in edge["tagged"]:
+                _line(canvas, frame, (cx - half + 0.01, base + offset), (cx + half - 0.01, base + offset),
+                      C_EDGE, 2)
+        conf = s.get("conf")
+        if conf:
+            for offset, _ in conf["tagged"]:
+                _line(canvas, frame, (cx - half * 0.55, base + offset), (cx + half * 0.55, base + offset),
+                      C_CONF, 1.5, dash=True)
+        for offset in s.get("joint", []):
+            _line(canvas, frame, (cx - half + 0.01, clear + offset), (cx + half - 0.01, clear + offset),
+                  C_EDGE, 2)
 
     _dimensions(canvas, frame, data)
     # below everything (a footing under the base included), one line each
     floor, u = _floor(data), _elevation_unit(data)
-    _text(canvas, frame, 0.0, floor - 0.8 * u, u"Luz libre {:.2f} m".format(clear), brush=C_DIM, size=10)
+    clears = u" / ".join(u"{:.2f}".format(s["clear"]) for s in segments)
+    _text(canvas, frame, 0.0, floor - 0.8 * u,
+          u"{} {} m".format(u"Luz libre" if len(segments) == 1 else u"Luces libres (de abajo arriba):", clears),
+          brush=C_DIM, size=10)
     if data.get("message"):
         _text(canvas, frame, 0.0, floor - 2.0 * u, data["message"], brush=_brush(192, 57, 43), size=10)
 
@@ -412,14 +450,16 @@ def _add_tube(mesh, a, b, radius, sides):
             mesh.TriangleIndices.Add(idx)
 
 
-def _add_prism(mesh, polygon, height):
-    """Section polygon extruded from 0 to height (fan-triangulated caps:
-    fine for the convex sections columns have)."""
+def _add_prism(mesh, polygon, height, offset=(0.0, 0.0, 0.0)):
+    """Section polygon extruded from 0 to height, moved by offset (fan-
+    triangulated caps: fine for the convex sections columns have)."""
     n = len(polygon)
+    dx, dy, dz = offset
+    polygon = [(x + dx, y + dy) for x, y in polygon]
     cx = sum(p[0] for p in polygon) / n
     cy = sum(p[1] for p in polygon) / n
     base = mesh.Positions.Count
-    for z in (0.0, height):
+    for z in (dz, dz + height):
         mesh.Positions.Add(Point3D(cx, cy, z))
         for x, y in polygon:
             mesh.Positions.Add(Point3D(x, y, z))
@@ -539,9 +579,11 @@ class Scene3D(object):
         if detail == u"Bajo":
             colors = dict((k, _color(50, 50, 50)) for k in colors)
         meshes = dict((k, MeshGeometry3D()) for k in colors)
-        for x, y, radius in data["bars"]:
-            _add_tube(meshes["longitudinal"], (x, y, 0.0), (x, y, data["height"]),
-                      radius if solid else thin, sides)
+        segments = _segments(data)  # stacked columns (loops come placed)
+        for s in segments:
+            for x, y, radius in data["bars"]:
+                _add_tube(meshes["longitudinal"], (x + s["x"], y + s["y"], s["z"]),
+                          (x + s["x"], y + s["y"], s["z"] + s["height"]), radius if solid else thin, sides)
         for kind, pts, closed, zs, radius in data["loops"]:
             r = radius if solid else thin * 0.8
             count = len(pts) if closed else len(pts) - 1
@@ -569,7 +611,8 @@ class Scene3D(object):
             group.Children.Add(model)
         if detail != u"Bajo":
             concrete = MeshGeometry3D()
-            _add_prism(concrete, data["polygon"], data["height"])
+            for s in segments:
+                _add_prism(concrete, data["polygon"], s["height"], (s["x"], s["y"], s["z"]))
             glass = DiffuseMaterial(SolidColorBrush(_color(170, 180, 195, 70)))
             model = GeometryModel3D(concrete, glass)
             model.BackMaterial = glass
