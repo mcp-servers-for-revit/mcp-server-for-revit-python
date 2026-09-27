@@ -1288,6 +1288,19 @@ def create_formwork_panel(
     return ds
 
 
+def write_element_results(element, values):
+    """Fill the formwork result parameters (formwork_params
+    ELEMENT_RESULT_PARAMS) on a source element; any that isn't bound or
+    is read-only is skipped."""
+    for name, value in values.items():
+        try:
+            p = element.LookupParameter(name)
+            if p is not None and not p.IsReadOnly:
+                p.Set(value)
+        except Exception:
+            continue
+
+
 SOIL_MARGIN_FT = 1.0  # soil block reaches this far around/below a face
 
 
@@ -1559,6 +1572,7 @@ def process_formwork(
             specs = sorted(
                 classification["included_faces"], key=lambda s: -s["area_m2"]
             )
+            element_panels = 0
             for face_spec in specs:
                 try:
                     face_spec = adjust_panel_joints(
@@ -1592,6 +1606,7 @@ def process_formwork(
                         placed_hash.insert(len(placed_solids), box)
                         placed_solids.append(solid)
                     panels_created += 1
+                    element_panels += 1
                 except Exception as e:
                     warnings.append(
                         "Elemento {}: no se pudo crear el panel de una cara ({} m2) - {}".format(
@@ -1600,6 +1615,17 @@ def process_formwork(
                             str(e),
                         )
                     )
+
+            write_element_results(
+                candidate.element,
+                {
+                    "EF_Area_Encofrado_m2": classification["included_area_m2"],
+                    "EF_Area_Contacto_m2": classification["excluded_contact_area_m2"],
+                    "EF_Area_Contra_Terreno_m2": classification["excluded_soil_area_m2"],
+                    "EF_Paneles": element_panels,
+                    "EF_Material_Encofrado": formwork_material or "",
+                },
+            )
 
         cat_label = CATEGORY_MAP[candidate.category_key]["label"]
         totals = category_totals.setdefault(

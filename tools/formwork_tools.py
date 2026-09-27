@@ -61,6 +61,11 @@ def register_formwork_tools(mcp, revit_get, revit_post):
         Set scope="selection" and pass `element_ids` to restrict the run to
         specific elements instead of the whole model.
 
+        When geometry is created, each processed element also gets its
+        results in instance parameters (for schedules): EF_Area_Encofrado_m2,
+        EF_Area_Contacto_m2, EF_Area_Contra_Terreno_m2, EF_Paneles and
+        EF_Material_Encofrado.
+
         Masonry walls (albanileria) never get formwork; they still count as
         neighbors (a column cast against a brick wall needs none there).
 

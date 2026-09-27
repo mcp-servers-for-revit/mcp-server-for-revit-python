@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 GROUP_NAME = "Encofrado"
 SHARED_PARAM_FILE_NAME = "EncofradoSharedParams.txt"
 
+INTEGER = "integer"  # `is_text` value for a whole-number parameter
+
 # name -> (is_text, [BuiltInCategory,...])
 PANEL_PARAMS = [
     ("EF_Elemento_Origen_Id", True),
@@ -31,6 +33,27 @@ PANEL_CATEGORIES = [DB.BuiltInCategory.OST_GenericModel]
 # flip arrows show), "Ambas", "Ninguna", or blank for automatic detection.
 ELEMENT_PARAMS = [
     ("EF_Cara_Contra_Terreno", True, [DB.BuiltInCategory.OST_Walls]),
+]
+
+# Every category that gets formwork (CATEGORY_MAP in formwork_geometry).
+STRUCTURAL_CATEGORIES = [
+    DB.BuiltInCategory.OST_StructuralColumns,
+    DB.BuiltInCategory.OST_StructuralFraming,
+    DB.BuiltInCategory.OST_Floors,
+    DB.BuiltInCategory.OST_Walls,
+    DB.BuiltInCategory.OST_StructuralFoundation,
+    DB.BuiltInCategory.OST_Stairs,
+]
+
+# Formwork results written on each processed source element by every run
+# that creates geometry (name, is_text). EF_Material_Encofrado is shared
+# with the panels.
+ELEMENT_RESULT_PARAMS = [
+    ("EF_Area_Encofrado_m2", False),
+    ("EF_Area_Contacto_m2", False),
+    ("EF_Area_Contra_Terreno_m2", False),
+    ("EF_Paneles", INTEGER),
+    ("EF_Material_Encofrado", True),
 ]
 
 _FILE_HEADER = (
@@ -51,11 +74,16 @@ def _shared_param_file_path():
 
 
 def _spec_id(is_text):
-    """Return the type spec for the parameter, handling both the modern
-    ForgeTypeId (SpecTypeId, Revit 2022+) and legacy ParameterType API."""
+    """Return the type spec for the parameter (`is_text`: True text, False
+    number, INTEGER whole number), handling both the modern ForgeTypeId
+    (SpecTypeId, Revit 2022+) and legacy ParameterType API."""
     try:
+        if is_text == INTEGER:
+            return DB.SpecTypeId.Int.Integer
         return DB.SpecTypeId.String.Text if is_text else DB.SpecTypeId.Number
     except AttributeError:
+        if is_text == INTEGER:
+            return DB.ParameterType.Integer
         return DB.ParameterType.Text if is_text else DB.ParameterType.Number
 
 
@@ -93,7 +121,20 @@ def _category_set(doc, built_in_categories):
 def _ensure_binding(doc, definition, built_in_categories, is_instance=True):
     binding_map = doc.ParameterBindings
     if binding_map.Contains(definition):
-        return False  # already bound somewhere; leave it as the user configured it
+        # Already bound: only add the categories it's missing, keeping the
+        # rest as the user configured it.
+        binding = binding_map.get_Item(definition)
+        missing = [
+            c
+            for c in _category_set(doc, built_in_categories)
+            if not binding.Categories.Contains(c)
+        ]
+        if not missing:
+            return False
+        for category in missing:
+            binding.Categories.Insert(category)
+        binding_map.ReInsert(definition, binding, _group_type_id())
+        return True
 
     cat_set = _category_set(doc, built_in_categories)
     binding = (
@@ -107,8 +148,10 @@ def _ensure_binding(doc, definition, built_in_categories, is_instance=True):
 
 def ensure_shared_parameters(doc):
     """Make sure every formwork panel parameter exists and is bound to
-    the Generic Models category, and the per-element control parameters
-    (ELEMENT_PARAMS) to their categories. Must be called inside an active
+    the Generic Models category, the per-element control parameters
+    (ELEMENT_PARAMS) to their categories, and the per-element results
+    (ELEMENT_RESULT_PARAMS) to every structural category. Must be called
+    inside an active
     Transaction. Returns a list of human-readable warnings (empty on
     full success)."""
 
@@ -145,7 +188,10 @@ def ensure_shared_parameters(doc):
                 "No se pudo crear/enlazar el parametro {}: {}".format(name, str(e))
             )
 
-    for name, is_text, categories in ELEMENT_PARAMS:
+    element_params = ELEMENT_PARAMS + [
+        (name, is_text, STRUCTURAL_CATEGORIES) for name, is_text in ELEMENT_RESULT_PARAMS
+    ]
+    for name, is_text, categories in element_params:
         try:
             definition = _get_or_create_definition(group, name, is_text)
             _ensure_binding(doc, definition, categories, is_instance=True)
