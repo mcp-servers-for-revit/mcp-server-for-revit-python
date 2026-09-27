@@ -356,10 +356,11 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
     (e.g. a beam framing into the side of a column), instead of an
     all-or-nothing decision for the whole face.
 
-    Works on a UV grid (cheap point probes, same technique as
-    `_has_contact`) rather than a 3D solid boolean: booleans between
-    coincident/touching Revit solids are notoriously fragile, which is
-    why the rest of this module avoids them.
+    Contact is detected on a UV grid (cheap point probes, same technique
+    as `_has_contact`); the free region itself is then cut exactly from
+    the neighbors that touch (`_exact_free_region`), one panel per
+    connected area. Only if that boolean fails does the grid carve the
+    region into rectangles (approximate, reported as `approximate`).
 
     Returns a dict with `included_faces` (panel specs, possibly several
     per face), `included_area_m2` and `contact_area_m2`; `{"no_contact":
@@ -440,6 +441,7 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
 
     contact = set()
     soil = set()  # poured against the ground: excluded, reported apart
+    touching_idxs = set()
     for (i, j), neighbor_idxs in nearby.items():
         uv = _cell_center(i, j)
         try:
@@ -451,16 +453,30 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
         near = [neighbors[k] for k in neighbor_idxs]
         if _has_contact(point, normal, tol_ft, [n for n in near if n.category_key != "soil"]):
             contact.add((i, j))
+            touching_idxs.update(neighbor_idxs)
         elif _has_contact(point, normal, tol_ft, [n for n in near if n.category_key == "soil"]):
             soil.add((i, j))
+            touching_idxs.update(neighbor_idxs)
 
     if not contact and not soil:
         # Nothing actually touches this face: the caller keeps the whole
         # face with its exact edge loops, no grid needed.
         return {"no_contact": True}
 
-    # Pass 2 — only faces with real contact pay for the full grid, which
-    # is needed to carve the free region into panel rectangles.
+    touching = [neighbors[k] for k in sorted(touching_idxs)]
+    exact = _exact_free_region(
+        face,
+        normal,
+        [n for n in touching if n.category_key != "soil"],
+        [n for n in touching if n.category_key == "soil"],
+        tol_ft,
+    )
+    if exact is not None:
+        return exact
+
+    # Pass 2 (fallback when the exact cut fails) — carve the free region
+    # into panel rectangles on the full grid. Approximate: a sloped or
+    # curved boundary comes out stair-stepped, in several panels.
     grid = [[False for _ in range(u_steps)] for _ in range(v_steps)]
     for j in range(v_steps):
         for i in range(u_steps):
@@ -534,7 +550,155 @@ def _partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):
         "included_area_m2": included_area_m2,
         "contact_area_m2": contact_area_m2,
         "soil_area_m2": soil_area_m2,
+        "approximate": True,
     }
+
+
+def _subtract_solids(solid, others):
+    """`solid` minus every solid in `others`; raises if Revit's boolean
+    fails, None once nothing is left."""
+    for other in others:
+        solid = DB.BooleanOperationsUtils.ExecuteBooleanOperation(
+            solid, other, DB.BooleanOperationsType.Difference
+        )
+        if solid is None or solid.Volume < MIN_PANEL_VOLUME_FT3 * 1e-3:
+            return None
+    return solid
+
+
+def _faces_on_plane(solid, normal, point):
+    """Planar faces of `solid` facing along `normal` and lying on the
+    plane through `point`."""
+    if solid is None:
+        return []
+    found = []
+    for f in solid.Faces:
+        if not isinstance(f, DB.PlanarFace):
+            continue
+        if f.FaceNormal.DotProduct(normal) < 0.999:
+            continue
+        if abs(f.Origin.Subtract(point).DotProduct(normal)) > 1e-5:
+            continue
+        found.append(f)
+    return found
+
+
+# Retry offsets (ft) of the section outline for `_exact_free_region`: Revit
+# booleans often fail when the face's edges lie flush on a neighbor's faces
+# (a footing flush with a mat); growing or shrinking the outline by ~1 mm
+# breaks that coincidence, and the pieces are offset back afterwards.
+EXACT_CUT_GROW_FT = (0.0, 1.0 / 304.8, -1.0 / 304.8)
+
+
+def _loop_area(loop, normal, signed=False):
+    """Enclosed area (ft2) of a planar CurveLoop with plane `normal`;
+    `signed`: positive when counterclockwise around `normal` (an outer
+    loop in a face's own orientation), negative for its holes."""
+    pts = []
+    for curve in loop:
+        pts.extend(list(curve.Tessellate())[:-1])
+    total = DB.XYZ.Zero
+    for k in range(len(pts)):
+        total = total.Add(pts[k].CrossProduct(pts[(k + 1) % len(pts)]))
+    area = total.DotProduct(normal) / 2.0
+    return area if signed else abs(area)
+
+
+def _section_pieces(section_faces, back, grow, normal):
+    """Panel outlines (on the original face, in its orientation) and
+    areas (ft2) of the free section faces."""
+    pieces = []
+    for f in section_faces:
+        edge_loops = list(f.GetEdgesAsCurveLoops())
+        if grow:
+            # A loop about as thin as the growth itself is the grown margin
+            # left over along a neighbor, not a real panel (and can't be
+            # offset back): drop it.
+            edge_loops = [
+                l
+                for l in edge_loops
+                if _loop_area(l, normal) > 1.5 * abs(grow) * l.GetExactLength()
+            ]
+            if not edge_loops:
+                continue
+        loops = []
+        for l in edge_loops:
+            loop = DB.CurveLoop.CreateViaTransform(l, back)
+            # The section faces away from the face: flip its loops to the
+            # face's own orientation, like the no-contact path.
+            loop.Flip()
+            if grow:
+                try:
+                    loop = DB.CurveLoop.CreateViaOffset(loop, -grow, normal)
+                except Exception:
+                    pass  # keep the outline ~1 mm off: right shape, negligible area
+            loops.append(loop)
+        if grow:
+            area = sum(_loop_area(l, normal, signed=True) for l in loops)
+        else:
+            area = f.Area
+        pieces.append((List[DB.CurveLoop](loops), area))
+    return pieces
+
+
+def _exact_free_region(face, normal, contact_neighbors, soil_neighbors, tol_ft):
+    """Exact version of the grid partition: the free part of a planar face
+    is the section, `tol_ft` in front of it, of a thin slab minus the
+    neighbors (and then the soil) - so a sloped or curved contact boundary
+    is followed exactly and each connected free area becomes one panel
+    with its real outline (holes included).
+
+    The section is taken off the face itself so no boolean works on
+    coplanar faces. Returns the same dict as `_partition_face_by_contact`,
+    or None if Revit's boolean fails (caller falls back to the grid)."""
+    contact_solids = [s for n in contact_neighbors for s in n.get_solids()]
+    soil_solids = [s for n in soil_neighbors for s in n.get_solids()]
+    lift = DB.Transform.CreateTranslation(normal.Multiply(tol_ft))
+    back = DB.Transform.CreateTranslation(normal.Multiply(-tol_ft))
+    base_point = face.Origin.Add(normal.Multiply(tol_ft))
+    down = normal.Negate()
+
+    for grow in EXACT_CUT_GROW_FT:
+        try:
+            loops = []
+            for l in face.GetEdgesAsCurveLoops():
+                loop = DB.CurveLoop.CreateViaTransform(l, lift)
+                if grow:
+                    loop = DB.CurveLoop.CreateViaOffset(loop, grow, normal)
+                loops.append(loop)
+            slab = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
+                List[DB.CurveLoop](loops), normal, tol_ft
+            )
+            free = _subtract_solids(slab, contact_solids)
+            free_pieces = _section_pieces(
+                _faces_on_plane(free, down, base_point), back, grow, normal
+            )
+            if soil_solids and free is not None:
+                free = _subtract_solids(free, soil_solids)
+                final_pieces = _section_pieces(
+                    _faces_on_plane(free, down, base_point), back, grow, normal
+                )
+            else:
+                final_pieces = free_pieces
+        except Exception:
+            continue
+
+        free_area = sum(a for _, a in free_pieces)
+        final_area = sum(a for _, a in final_pieces)
+        return {
+            "included_faces": [
+                {
+                    "loops": loops,
+                    "direction": normal,
+                    "area_m2": round(area * FT2_TO_M2, 6),
+                }
+                for loops, area in final_pieces
+            ],
+            "included_area_m2": final_area * FT2_TO_M2,
+            "contact_area_m2": max(0.0, face.Area - free_area) * FT2_TO_M2,
+            "soil_area_m2": max(0.0, free_area - final_area) * FT2_TO_M2,
+        }
+    return None
 
 
 VERTICAL_NORMAL_Z = 0.1  # |normal.Z| below this = vertical face
@@ -818,6 +982,7 @@ def classify_element_faces(candidate, neighbors, config, warnings, soil_for_face
     area_soil = 0.0
     face_count = 0
     skipped_curved = 0
+    approximate_faces = 0
 
     for solid in candidate.get_solids():
         for face in solid.Faces:
@@ -866,6 +1031,8 @@ def classify_element_faces(candidate, neighbors, config, warnings, soil_for_face
                     included_faces.extend(partition["included_faces"])
                     area_included += partition["included_area_m2"]
                     area_soil += partition.get("soil_area_m2", 0.0)
+                    if partition.get("approximate"):
+                        approximate_faces += 1
                     if is_bottom:
                         area_bottom_excluded += partition["contact_area_m2"]
                     else:
@@ -904,6 +1071,14 @@ def classify_element_faces(candidate, neighbors, config, warnings, soil_for_face
                 }
             )
             area_included += area_m2
+
+    if approximate_faces:
+        warnings.append(
+            "Elemento {} ({}): {} cara(s) recortadas con el metodo aproximado "
+            "(cuadricula), el corte exacto fallo".format(
+                element_id_value(candidate.element.Id), cat_info["label"], approximate_faces
+            )
+        )
 
     if skipped_curved:
         warnings.append(
