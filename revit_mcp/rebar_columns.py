@@ -575,9 +575,23 @@ NEIGHBOR_CATEGORIES = (
 )
 
 
-def column_neighbors(doc, column, section, reach_m=0.6, contact_m=0.02):
-    """Elements touching the column (within `contact_m`) - beams, slabs
-    and its footing - cut to `reach_m` around it,
+def _box_triangles(box):
+    """The 12 triangles of an axis-aligned box (x0, y0, z0, x1, y1, z1)."""
+    x0, y0, z0, x1, y1, z1 = box
+    c = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
+         (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
+    quads = ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7))
+    tris = []
+    for a, b, d, e in quads:
+        tris.append((c[a], c[b], c[d]))
+        tris.append((c[a], c[d], c[e]))
+    return tris
+
+
+def column_neighbors(doc, column, section, reach_m=0.6, contact_m=0.05):
+    """Elements touching the column (within `contact_m`: a beam cut back by
+    its join with the column still counts) - beams, slabs and its footing -
+    cut to `reach_m` around it,
     in the column's local frame (meters; x/y from the section center, z
     from the column base). Returns [{"label", "triangles": [(p, p, p)],
     "box": (x0, y0, z0, x1, y1, z1)}]."""
@@ -624,11 +638,13 @@ def column_neighbors(doc, column, section, reach_m=0.6, contact_m=0.02):
             if element.Id == column.Id:
                 continue
             triangles = []
+            failed = False
             for solid in _solids(element.get_Geometry(options)):
                 try:
                     part = DB.BooleanOperationsUtils.ExecuteBooleanOperation(
                         solid, crop, DB.BooleanOperationsType.Intersect)
                 except Exception:
+                    failed = True
                     continue
                 if part is None or part.Volume < 1e-6:
                     continue
@@ -637,6 +653,20 @@ def column_neighbors(doc, column, section, reach_m=0.6, contact_m=0.02):
                     for i in range(mesh.NumTriangles):
                         tri = mesh.get_Triangle(i)
                         triangles.append(tuple(local(tri.get_Vertex(k)) for k in range(3)))
+            if not triangles and failed:
+                # Revit couldn't cut it: show its bounding box, cut to the
+                # same zone, rather than leaving it out.
+                ebb = element.get_BoundingBox(None)
+                if ebb is not None:
+                    pts = [local(DB.XYZ(x, y, z)) for x in (ebb.Min.X, ebb.Max.X)
+                           for y in (ebb.Min.Y, ebb.Max.Y) for z in (ebb.Min.Z, ebb.Max.Z)]
+                    height = (section.z_top - section.z_bottom) * FT
+                    box = (max(min(q[0] for q in pts), x0), max(min(q[1] for q in pts), y0),
+                           max(min(q[2] for q in pts), -reach_m),
+                           min(max(q[0] for q in pts), x1), min(max(q[1] for q in pts), y1),
+                           min(max(q[2] for q in pts), height + reach_m))
+                    if box[0] < box[3] and box[1] < box[4] and box[2] < box[5]:
+                        triangles = _box_triangles(box)
             if not triangles:
                 continue
             pts = [p for tri in triangles for p in tri]

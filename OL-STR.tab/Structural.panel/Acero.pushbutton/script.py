@@ -244,7 +244,10 @@ class AceroWindow(forms.WPFWindow):
         self._views_sig = None
         self._elev_data = None
         self._clear_cache = {}
-        self._neighbor_cache = {}  # type id -> elements touching its column
+        self._neighbor_cache = {}  # column id -> elements touching it
+        self._section_cache = {}  # column id -> rc.Section
+        self._view_column = None  # the column the 3D view and elevation show
+        self._filling_columns = False
         self.levels = sorted(
             DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements(),
             key=lambda lv: lv.ProjectElevation,
@@ -332,6 +335,7 @@ class AceroWindow(forms.WPFWindow):
         self.undo_stack = []
         self.draft = []
         self.selected = None
+        self._fill_view_columns(t)
         self.plan_nav.reset()
         self.elev_nav.reset()
         self.scene._extent = None  # refit the 3D camera to the new column
@@ -782,7 +786,8 @@ class AceroWindow(forms.WPFWindow):
                 self.cursor_m, self.cursor_on_bar) is None
             self._dot(frame, self.cursor_m[0], self.cursor_m[1], 4 if refused else 3,
                       C_REFUSED if refused else C_CURSOR)
-        signature = (self.state.active, rs.design_to_text(self.design),
+        signature = (self.state.active, id_of(self._view_column.Id) if self._view_column else None,
+                     rs.design_to_text(self.design),
                      tuple(sorted(self._get_form().items())))
         if signature != self._views_sig:
             self._views_sig = signature
@@ -1086,6 +1091,38 @@ class AceroWindow(forms.WPFWindow):
         self.redraw()
 
     # -- elevation and 3D views ----------------------------------------------
+    def _fill_view_columns(self, t):
+        """List the type's columns for the 3D view / elevation, the one
+        picked in the model (if any) first choice."""
+        self._filling_columns = True
+        try:
+            labels = []
+            default = 0
+            picked = set(self.state.picked_ids)
+            for index, column in enumerate(t.columns):
+                level = doc.GetElement(column.LevelId)
+                labels.append(u"{} - {}".format(id_of(column.Id), level.Name if level else u"sin nivel"))
+                if id_of(column.Id) in picked and default == 0:
+                    default = index
+            self.cbo_view_column.ItemsSource = List[str](labels)
+            self.cbo_view_column.SelectedIndex = default
+            self._view_column = t.columns[default]
+        finally:
+            self._filling_columns = False
+
+    def view_column_changed(self, sender, args):
+        if getattr(self, "_filling_columns", True):
+            return
+        t = self.by_id.get(self.state.active)
+        index = self.cbo_view_column.SelectedIndex
+        if t is None or index < 0 or index >= len(t.columns):
+            return
+        self._view_column = t.columns[index]
+        self.elev_nav.reset()
+        self.scene._extent = None
+        self._views_sig = None  # force the views to redraw for this column
+        self.redraw()
+
     def config_changed(self, sender, args):
         if hasattr(self, "_views_sig"):  # also fired while the XAML loads
             self.redraw()
@@ -1107,23 +1144,32 @@ class AceroWindow(forms.WPFWindow):
         """(elevation data, 3D data) of the active type as configured and
         drawn right now (unsaved changes included)."""
         t = self.by_id.get(self.state.active)
-        section = t.section if t else None
-        if section is None:
+        if t is None or t.section is None:
             return None, None
-        height = (section.z_top - section.z_bottom) * rc.FT
-        if t.id not in self._clear_cache:
+        # The column chosen in "Columna:" (each has its own height and
+        # its own beams, slab and footing).
+        column = self._view_column if self._view_column in t.columns else t.columns[0]
+        key = id_of(column.Id)
+        if key not in self._section_cache:
             try:
-                top = rc.clear_top(doc, t.columns[0], section)
+                self._section_cache[key] = rc.Section(column)
+            except Exception:
+                self._section_cache[key] = t.section
+        section = self._section_cache[key]
+        height = (section.z_top - section.z_bottom) * rc.FT
+        if key not in self._clear_cache:
+            try:
+                top = rc.clear_top(doc, column, section)
             except Exception:
                 top = section.z_top
-            self._clear_cache[t.id] = (top - section.z_bottom) * rc.FT
-        clear = self._clear_cache[t.id]
-        if t.id not in self._neighbor_cache:
+            self._clear_cache[key] = (top - section.z_bottom) * rc.FT
+        clear = self._clear_cache[key]
+        if key not in self._neighbor_cache:
             try:
-                self._neighbor_cache[t.id] = rc.column_neighbors(doc, t.columns[0], section)
+                self._neighbor_cache[key] = rc.column_neighbors(doc, column, section)
             except Exception:
-                self._neighbor_cache[t.id] = []
-        neighbors = self._neighbor_cache[t.id]
+                self._neighbor_cache[key] = []
+        neighbors = self._neighbor_cache[key]
         f = self._get_form()
         edge, edge_msg = self._family_view(f["edge"], f["edge_dist"], clear)
         conf, conf_msg = self._family_view(f["conf"], f["conf_dist"], clear)

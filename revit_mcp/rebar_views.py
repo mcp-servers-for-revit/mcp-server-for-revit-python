@@ -193,12 +193,50 @@ def _widen(data):
     return max(1.0, min(4.0, data["height"] / (data["width"] * 4.0)))
 
 
+DIM_CHAIN_X = 0.30  # dimension lines, measured left of the column face
+DIM_TOTAL_X = 0.48
+
+
+def _dimension(canvas, frame, x, z0, z1, text, x_from):
+    """A vertical dimension at x from z0 to z1: extension lines from
+    x_from, the dimension line with ticks, and its value to the left."""
+    for z in (z0, z1):
+        _line(canvas, frame, (x_from, z), (x - 0.03, z), C_DIM, 0.8)
+        _line(canvas, frame, (x - 0.02, z - 0.02), (x + 0.02, z + 0.02), C_DIM, 1.2)
+    _line(canvas, frame, (x, z0), (x, z1), C_DIM, 1)
+    _text(canvas, frame, x - 0.03, (z0 + z1) / 2.0, text, brush=C_DIM, size=10, anchor="right")
+
+
+def _dimensions(canvas, frame, data, half):
+    """Dimensions on the left of the elevation: a chain through footing,
+    clear height and the beam/slab over it, plus the column's total
+    height further out."""
+    height, clear = data["height"], data["clear"]
+    neighbors = data.get("neighbors", [])
+    marks = [0.0, clear, height]
+    footings = [n["box"][2] for n in neighbors if n["label"] == u"ZAPATA"]
+    if footings and min(footings) < -0.01:
+        marks.append(min(footings))
+    framing = [n["box"][5] for n in neighbors if n["label"] in (u"VIGA", u"LOSA")]
+    if framing and max(framing) > height + 0.01:
+        marks.append(max(framing))
+    levels = []
+    for z in sorted(marks):
+        if not levels or z - levels[-1] > 0.01:
+            levels.append(z)
+    x_chain = -half - DIM_CHAIN_X
+    for z0, z1 in zip(levels, levels[1:]):
+        _dimension(canvas, frame, x_chain, z0, z1, u"{:.2f}".format(z1 - z0), -half)
+    _dimension(canvas, frame, -half - DIM_TOTAL_X, 0.0, height, u"H {:.2f}".format(height), x_chain)
+
+
 def elevation_extent(data):
     half = data["width"] * _widen(data) / 2.0
     zs = [z for n in data.get("neighbors", []) for z in (n["box"][2], n["box"][5])]
     bottom = min([-0.17] + [z - 0.17 for z in zs])
     top = max([data["height"] + 0.14] + [z + 0.08 for z in zs])
-    return -half - 0.20, bottom, half + 0.30, top
+    # room on the left for the zone bands and the two dimension lines
+    return -half - DIM_TOTAL_X - 0.34, bottom, half + 0.30, top
 
 
 def draw_elevation(canvas, data, frame):
@@ -267,6 +305,7 @@ def draw_elevation(canvas, data, frame):
     for offset in data.get("joint", []):
         _line(canvas, frame, (-half + 0.01, clear + offset), (half - 0.01, clear + offset), C_EDGE, 2)
 
+    _dimensions(canvas, frame, data, half)
     # below everything (a footing under the base included)
     floor = min([0.0] + [n["box"][2] for n in neighbors])
     _text(canvas, frame, 0.0, floor - 0.045, u"Luz libre {:.2f} m".format(clear), brush=C_DIM, size=10)
