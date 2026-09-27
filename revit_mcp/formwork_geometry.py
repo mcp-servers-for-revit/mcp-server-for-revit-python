@@ -239,6 +239,67 @@ def find_ground_elevation_ft(doc):
     return 0.0
 
 
+# Where each category keeps its level when `LevelId` is empty: beams
+# (reference level), stairs (base level), then the generic ones.
+_LEVEL_PARAMS = (
+    DB.BuiltInParameter.INSTANCE_REFERENCE_LEVEL_PARAM,
+    DB.BuiltInParameter.FAMILY_BASE_LEVEL_PARAM,
+    DB.BuiltInParameter.STAIRS_BASE_LEVEL_PARAM,
+    DB.BuiltInParameter.WALL_BASE_CONSTRAINT,
+    DB.BuiltInParameter.SCHEDULE_LEVEL_PARAM,
+    DB.BuiltInParameter.LEVEL_PARAM,
+)
+
+
+def element_level_id(element, levels=None):
+    """Level an element belongs to: its `LevelId`, else its level
+    parameter, else (`levels` given) the highest level at or below the
+    bottom of its bounding box - e.g. a footing hosted on a face. None if
+    nothing applies."""
+    invalid = DB.ElementId.InvalidElementId
+    try:
+        level_id = element.LevelId
+        if level_id is not None and level_id != invalid:
+            return level_id
+    except Exception:
+        pass
+    for bip in _LEVEL_PARAMS:
+        try:
+            p = element.get_Parameter(bip)
+            if p is not None and p.StorageType == DB.StorageType.ElementId:
+                level_id = p.AsElementId()
+                if level_id != invalid:
+                    return level_id
+        except Exception:
+            continue
+    if levels:
+        bb = element.get_BoundingBox(None)
+        if bb is not None:
+            below = [lv for lv in levels if lv.ProjectElevation <= bb.Min.Z + 1e-3]
+            if below:
+                return max(below, key=lambda lv: lv.ProjectElevation).Id
+            return min(levels, key=lambda lv: lv.ProjectElevation).Id
+    return None
+
+
+def category_key_of(element):
+    """(CATEGORY_MAP key or None, element to process). A stair run or
+    landing stands for its whole stair (whose geometry includes them)."""
+    get_stairs = getattr(element, "GetStairs", None)
+    if get_stairs is not None:
+        try:
+            element = get_stairs() or element
+        except Exception:
+            pass
+    category = element.Category
+    if category is None:
+        return None, element
+    for key, info in CATEGORY_MAP.items():
+        if element_id_value(category.Id) == int(info["bic"]):
+            return key, element
+    return None, element
+
+
 def _face_world_bbox(face):
     """Approximate world-space bounding box of a face as a box tuple,
     built from its triangulated mesh (works for any loop shape, holes

@@ -30,6 +30,8 @@ reload(fw_geom)
 reload(fw_params)
 
 from pyrevit import revit, DB, forms, script
+from Autodesk.Revit.Exceptions import OperationCanceledException
+from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from System.Collections.Generic import List
 
 output = script.get_output()
@@ -94,6 +96,16 @@ class CategoriesWindow(forms.WPFWindow):
         self.pour_against_soil = True
         self.ground_elevation_ft = default_ground
 
+        # "Por nivel" scope: preselect the active view's level, if any.
+        self.cbo_scope_level.ItemsSource = List[str]([lv.Name for lv in self.levels])
+        view_level = getattr(doc.ActiveView, "GenLevel", None)
+        for idx, lv in enumerate(self.levels):
+            if view_level is not None and lv.Id == view_level.Id:
+                self.cbo_scope_level.SelectedIndex = idx
+                break
+        self.scope = "model"
+        self.scope_level = None
+
     def select_all_click(self, sender, args):
         for _, _, chk_name, _ in CATEGORY_ROWS:
             getattr(self, chk_name).IsChecked = True
@@ -113,6 +125,17 @@ class CategoriesWindow(forms.WPFWindow):
         if not selected_keys:
             forms.alert("Selecciona al menos una categoria.", title="Encofrado")
             return
+
+        if self.rb_scope_level.IsChecked:
+            if self.cbo_scope_level.SelectedIndex < 0:
+                forms.alert("Elige el nivel a encofrar.", title="Encofrado")
+                return
+            self.scope = "level"
+            self.scope_level = self.levels[self.cbo_scope_level.SelectedIndex]
+        elif self.rb_scope_pick.IsChecked:
+            self.scope = "pick"
+        else:
+            self.scope = "model"
 
         self.selected_keys = selected_keys
         self.formwork_materials = formwork_materials
@@ -134,16 +157,7 @@ if not categories_window.confirmed:
 
 selected_keys = categories_window.selected_keys
 formwork_materials = categories_window.formwork_materials
-
-mode = forms.CommandSwitchWindow.show(
-    ["Vista previa (sin cambios en el modelo)", "Generar geometria y cantidades"],
-    message="Modo de ejecucion:",
-)
-
-if not mode:
-    script.exit()
-
-dry_run = mode.startswith("Vista previa")
+scope = categories_window.scope
 
 
 def collect(bic):
@@ -155,18 +169,88 @@ def collect(bic):
     )
 
 
-elements_by_category = {}
-for key in selected_keys:
-    cat_info = fw_geom.CATEGORY_MAP[key]
-    elements_by_category[key] = collect(cat_info["bic"])
+class _CategoryFilter(ISelectionFilter):
+    """Only lets the user pick elements of the checked categories."""
+
+    def AllowElement(self, element):
+        key, _ = fw_geom.category_key_of(element)
+        return key in selected_keys
+
+    def AllowReference(self, reference, point):
+        return False
+
+
+def picked_elements_by_category():
+    """Current selection if there is one, else ask the user to pick in the
+    view; grouped by category key (stair runs/landings -> their stair)."""
+    uidoc = revit.uidoc
+    picked = [doc.GetElement(i) for i in uidoc.Selection.GetElementIds()]
+    if not picked:
+        try:
+            refs = uidoc.Selection.PickObjects(
+                ObjectType.Element,
+                _CategoryFilter(),
+                "Selecciona los elementos a encofrar y pulsa Finalizar",
+            )
+        except OperationCanceledException:
+            script.exit()
+        picked = [doc.GetElement(r.ElementId) for r in refs]
+    grouped = {}
+    seen = set()
+    for element in picked:
+        if element is None:
+            continue
+        key, element = fw_geom.category_key_of(element)
+        if key not in selected_keys:
+            continue
+        element_id = fw_utils.element_id_value(element.Id)
+        if element_id in seen:
+            continue
+        seen.add(element_id)
+        grouped.setdefault(key, []).append(element)
+    return grouped
+
+
+if scope == "pick":
+    elements_by_category = picked_elements_by_category()
+    scope_label = "elementos seleccionados"
+    empty_message = (
+        "Ninguno de los elementos seleccionados pertenece a las categorias marcadas."
+    )
+else:
+    elements_by_category = {}
+    for key in selected_keys:
+        elements_by_category[key] = collect(fw_geom.CATEGORY_MAP[key]["bic"])
+    scope_label = "todo el modelo"
+    empty_message = "No se encontraron elementos en las categorias seleccionadas."
+    if scope == "level":
+        level = categories_window.scope_level
+        levels = categories_window.levels
+        for key in selected_keys:
+            elements_by_category[key] = [
+                e
+                for e in elements_by_category[key]
+                if fw_geom.element_level_id(e, levels) == level.Id
+            ]
+        scope_label = u"nivel {}".format(level.Name)
+        empty_message = u"No hay elementos de las categorias marcadas en el nivel {}.".format(
+            level.Name
+        )
 
 total_candidates = sum(len(v) for v in elements_by_category.values())
 if total_candidates == 0:
-    forms.alert(
-        "No se encontraron elementos en las categorias seleccionadas.",
-        title="Encofrado",
-    )
+    forms.alert(empty_message, title="Encofrado")
     script.exit()
+
+mode = forms.CommandSwitchWindow.show(
+    ["Vista previa (sin cambios en el modelo)", "Generar geometria y cantidades"],
+    message=u"Modo de ejecucion ({} elementos, {}):".format(total_candidates, scope_label),
+)
+
+if not mode:
+    script.exit()
+
+dry_run = mode.startswith("Vista previa")
 
 # Every structural category, used only as neighbor context for contact
 # trimming (never reported/paneled unless also selected above) - so a
@@ -203,6 +287,7 @@ else:
 output.print_md(
     "# Resultado Encofrado {}".format("(vista previa)" if dry_run else "")
 )
+output.print_md(u"**Alcance:** {}".format(scope_label))
 output.print_md("**Elementos procesados:** {}".format(report["element_count"]))
 if not dry_run:
     output.print_md("**Paneles creados:** {}".format(report["panels_created"]))
