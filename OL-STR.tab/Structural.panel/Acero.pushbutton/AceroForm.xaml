@@ -1,0 +1,51 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Acero - Columnas"
+        Height="640" Width="820" MinWidth="560" MinHeight="420"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip">
+    <!-- Resizable: the type table takes the spare space; "Continuar"
+         stays pinned at the bottom. -->
+    <DockPanel Margin="15">
+        <Button DockPanel.Dock="Bottom" x:Name="button_continue" Content="Continuar" Height="34" Margin="0,12,0,0" Click="continue_click"/>
+
+        <GroupBox DockPanel.Dock="Bottom" Header="Alcance: que columnas armar" Margin="0,12,0,0" Padding="8,6,8,6">
+            <StackPanel>
+                <RadioButton x:Name="rb_scope_model" GroupName="scope" IsChecked="True" Margin="0,2,0,4"
+                             Content="Todo el modelo"/>
+                <Grid Margin="0,2,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <RadioButton x:Name="rb_scope_level" GroupName="scope" Grid.Column="0" VerticalAlignment="Center"
+                                 Content="Por nivel (vaciado)"/>
+                    <ComboBox x:Name="cbo_scope_level" Grid.Column="1" VerticalAlignment="Center"
+                              IsEnabled="{Binding IsChecked, ElementName=rb_scope_level}"/>
+                </Grid>
+                <RadioButton x:Name="rb_scope_pick" GroupName="scope" Margin="0,2,0,2"
+                             Content="Seleccionar columnas en el modelo"/>
+                <TextBlock TextWrapping="Wrap" Margin="20,2,0,0" Foreground="Gray" FontSize="11"
+                           Text="Usa la seleccion actual si ya hay columnas seleccionadas; si no, las eliges en la vista al pulsar Continuar (Finalizar para terminar, Esc para cancelar)."/>
+            </StackPanel>
+        </GroupBox>
+
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8"
+                   Text="Armado por tipo de columna, segun planos. Se guarda en los parametros de tipo, asi que queda para la proxima vez. Los tipos sin longitudinal se omiten."/>
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="Gray" FontSize="11"
+                   Text="Ejemplos - Longitudinal: 8&#216;5/8&quot;  o  4&#216;3/4&quot; + 4&#216;5/8&quot;   |   Estribo: 3/8&quot;   |   Distribucion (desde cada extremo, en la luz libre): 1@.05, 10@.10, rto@.20   |   Recubrimiento en cm."/>
+
+        <DataGrid x:Name="grid_types" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                  CanUserReorderColumns="False" HeadersVisibility="Column" SelectionUnit="Cell"
+                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" MinHeight="120">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Tipo" Binding="{Binding Tipo}" IsReadOnly="True" Width="2*"/>
+                <DataGridTextColumn Header="Cant." Binding="{Binding Cantidad}" IsReadOnly="True" Width="45"/>
+                <DataGridTextColumn Header="Longitudinal" Binding="{Binding Longitudinal, UpdateSourceTrigger=PropertyChanged}" Width="1.4*"/>
+                <DataGridTextColumn Header="Estribo &#216;" Binding="{Binding Estribo, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                <DataGridTextColumn Header="Distribucion de estribos" Binding="{Binding Distribucion, UpdateSourceTrigger=PropertyChanged}" Width="1.6*"/>
+                <DataGridTextColumn Header="Recub. (cm)" Binding="{Binding Recubrimiento, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>

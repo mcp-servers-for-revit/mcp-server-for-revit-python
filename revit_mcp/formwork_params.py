@@ -111,11 +111,11 @@ def _group_type_id():
         return DB.BuiltInParameterGroup.PG_GENERAL
 
 
-def _get_or_create_group(def_file):
+def _get_or_create_group(def_file, group_name=GROUP_NAME):
     for group in def_file.Groups:
-        if group.Name == GROUP_NAME:
+        if group.Name == group_name:
             return group
-    return def_file.Groups.Create(GROUP_NAME)
+    return def_file.Groups.Create(group_name)
 
 
 def _get_or_create_definition(group, name, is_text):
@@ -171,6 +171,27 @@ def ensure_shared_parameters(doc):
     inside an active
     Transaction. Returns a list of human-readable warnings (empty on
     full success)."""
+    specs = [(name, is_text, PANEL_CATEGORIES, True) for name, is_text in PANEL_PARAMS]
+    specs += [(name, is_text, categories, True) for name, is_text, categories in ELEMENT_PARAMS]
+    specs += [
+        (name, is_text, STRUCTURAL_CATEGORIES, True)
+        for name, is_text in ELEMENT_RESULT_PARAMS
+    ]
+    warnings = ensure_parameters(doc, GROUP_NAME, specs)
+
+    try:
+        remove_obsolete_parameters(doc)
+    except Exception as e:
+        warnings.append("No se pudieron quitar parametros obsoletos: {}".format(str(e)))
+
+    return warnings
+
+
+def ensure_parameters(doc, group_name, specs):
+    """Create (in this extension's shared parameter file, under
+    `group_name`) and bind every parameter in `specs`:
+    [(name, is_text, [BuiltInCategory, ...], is_instance)]. Must be called
+    inside an active Transaction. Returns human-readable warnings."""
 
     warnings = []
     app = doc.Application
@@ -194,24 +215,12 @@ def ensure_shared_parameters(doc):
             app.SharedParametersFilename = previous_file
         return warnings
 
-    group = _get_or_create_group(def_file)
+    group = _get_or_create_group(def_file, group_name)
 
-    for name, is_text in PANEL_PARAMS:
+    for name, is_text, categories, is_instance in specs:
         try:
             definition = _get_or_create_definition(group, name, is_text)
-            _ensure_binding(doc, definition, PANEL_CATEGORIES, is_instance=True)
-        except Exception as e:
-            warnings.append(
-                "No se pudo crear/enlazar el parametro {}: {}".format(name, str(e))
-            )
-
-    element_params = ELEMENT_PARAMS + [
-        (name, is_text, STRUCTURAL_CATEGORIES) for name, is_text in ELEMENT_RESULT_PARAMS
-    ]
-    for name, is_text, categories in element_params:
-        try:
-            definition = _get_or_create_definition(group, name, is_text)
-            _ensure_binding(doc, definition, categories, is_instance=True)
+            _ensure_binding(doc, definition, categories, is_instance=is_instance)
         except Exception as e:
             warnings.append(
                 "No se pudo crear/enlazar el parametro {}: {}".format(name, str(e))
@@ -219,10 +228,5 @@ def ensure_shared_parameters(doc):
 
     if previous_file:
         app.SharedParametersFilename = previous_file
-
-    try:
-        remove_obsolete_parameters(doc)
-    except Exception as e:
-        warnings.append("No se pudieron quitar parametros obsoletos: {}".format(str(e)))
 
     return warnings
