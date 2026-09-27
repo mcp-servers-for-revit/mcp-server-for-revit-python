@@ -36,7 +36,7 @@ from pyrevit import revit, DB, forms, script
 from Autodesk.Revit.Exceptions import OperationCanceledException
 from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from System.Collections.Generic import List
-from System.Windows import Point, Size, Thickness, VerticalAlignment, Visibility
+from System.Windows import FontWeights, Point, Size, Thickness, VerticalAlignment, Visibility
 from System.Windows.Input import Key
 from System.Windows.Controls import (Button, Canvas, CheckBox, ListBoxItem, Orientation, StackPanel,
                                      TextBlock, TextBox)
@@ -576,7 +576,9 @@ class AceroWindow(forms.WPFWindow):
             sign = 1.0 if len(pts) < 3 or rs.polygon_signed_area(pts) > 0 else -1.0
         n = len(pts)
         sides = range(n if closed else n - 1)
+        numbered = True  # T1, T2... like the boxes of the measures panel
         if closed and rs.rect_measures(pts, frame[0].polygon_m) is not None:
+            numbered = False
             horizontal = [k for k in range(n) if abs(pts[k][1] - pts[(k + 1) % n][1]) < 1e-6]
             vertical = [k for k in range(n) if abs(pts[k][0] - pts[(k + 1) % n][0]) < 1e-6]
             sides = horizontal[:1] + vertical[:1]
@@ -586,8 +588,11 @@ class AceroWindow(forms.WPFWindow):
             if length < 1e-6:
                 continue
             nx, ny = sign * (y2 - y1) / length, -sign * (x2 - x1) / length  # outward
-            self._label(frame, (x1 + x2) / 2.0, (y1 + y2) / 2.0, u"{:.1f}".format(length * 100),
-                        dx=nx * 16, dy=-ny * 16)
+            text = u"{:.1f}".format(length * 100)
+            if numbered:
+                text = u"T{} {}".format(k + 1, text)
+            self._label(frame, (x1 + x2) / 2.0, (y1 + y2) / 2.0, text,
+                        dx=nx * 22, dy=-ny * 22)
 
     def redraw(self):
         self.canvas.Children.Clear()
@@ -805,8 +810,9 @@ class AceroWindow(forms.WPFWindow):
             self.panel_rect_fields.Visibility = Visibility.Collapsed
             # Open stirrups edit their segments in boxes; other shapes
             # just list their sides.
-            self.txt_m_sides.Text = u"" if is_open else u"Lados: " + u"  ·  ".join(
-                u"{:.1f}".format(v * 100) for v in rs.side_lengths(rs.counterclockwise(outline)))
+            self.txt_m_sides.Text = u"" if is_open else u"Lados:  " + u"   ".join(
+                u"T{} {:.1f}".format(k, v * 100)
+                for k, v in enumerate(rs.side_lengths(rs.counterclockwise(outline)), 1))
 
     def _fill_segment_boxes(self, lengths):
         """One editable box per segment of an open stirrup (outer face, cm)."""
@@ -814,11 +820,13 @@ class AceroWindow(forms.WPFWindow):
         self.segment_boxes = []
         if not lengths:
             return
-        label = TextBlock()
-        label.Text = u"Tramos: "
-        label.VerticalAlignment = VerticalAlignment.Center
-        self.panel_segments.Children.Add(label)
-        for value in lengths:
+        for number, value in enumerate(lengths, 1):
+            label = TextBlock()
+            label.Text = u"T{} ".format(number)
+            label.FontWeight = FontWeights.Bold
+            label.Foreground = C_DRAFT
+            label.VerticalAlignment = VerticalAlignment.Center
+            self.panel_segments.Children.Add(label)
             box = TextBox()
             box.Width = 46
             box.Margin = Thickness(0, 0, 4, 0)
