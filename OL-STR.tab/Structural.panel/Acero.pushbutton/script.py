@@ -1301,7 +1301,9 @@ class AceroWindow(forms.WPFWindow):
                         closed = not is_open
                 except rs.SpecError:
                     continue
-                zs = [dz + lift + z for z, _ in family["tagged"]] + [dz + lift + clear + j for j in joint]
+                # stacked towards the middle, like rc._runs
+                zs = ([dz + z + (lift if z <= clear / 2.0 + 1e-6 else -lift) for z, _ in family["tagged"]]
+                      + [dz + lift + clear + j for j in joint])
                 loops.append((kind, [(x + dx, y + dy) for x, y in line], closed, zs,
                               rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
         top = max(s["z"] + s["height"] for s in segments)
@@ -1915,8 +1917,9 @@ output.print_md("| **Total** | | **{:.2f}** | **{:.2f}** | **{:.2f}** | **{:.2f}
 
 output.print_md(
     "\n*Longitudinales rectas de piso a piso (sin empalmes ni anclajes). "
-    "Estribos en la luz libre, distribuidos desde cada extremo: hasta la cara inferior "
-    "de la losa superior (o de la viga si no hay losa); en el nucleo si se configuro.*"
+    "Estribos en la luz libre, distribuidos desde cada extremo: desde la base hasta el "
+    "fondo de la viga de mayor peralte (o la cara inferior de la losa si no hay viga); "
+    "en el nucleo si se configuro.*"
 )
 for type_name in sorted(stick_out):
     warnings.append(

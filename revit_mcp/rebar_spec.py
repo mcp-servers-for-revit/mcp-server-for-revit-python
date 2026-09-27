@@ -216,36 +216,7 @@ def parse_distribution(text):
 def stirrup_positions(length, zones, rest):
     """Stirrup offsets (m) along a clear length, laid out from both ends
     towards the middle (Peruvian '1@.05, 10@.10, rto@.20' convention)."""
-    if length <= 0:
-        return []
-    half = length / 2.0
-    eps = 1e-6
-    bottom = []
-    z = 0.0
-    for count, spacing in zones:
-        for _ in range(count):
-            if z + spacing > half + eps:
-                break
-            z += spacing
-            bottom.append(z)
-    while z + rest <= half + eps:
-        z += rest
-        bottom.append(z)
-    if not bottom:
-        return [half]
-    top = [length - p for p in reversed(bottom)]
-    last, first_top = bottom[-1], top[0]
-    gap = first_top - last
-    if gap < rest / 2.0:
-        # The two halves meet: one stirrup at the middle instead of two.
-        bottom = bottom[:-1]
-        top = top[1:]
-        middle = [half]
-    elif gap > rest + eps:
-        middle = [half]
-    else:
-        middle = []
-    return bottom + middle + top
+    return [p for p, _ in stirrup_zone_positions(length, zones, rest)]
 
 
 def group_runs(positions, tol=1e-4):
@@ -977,11 +948,18 @@ def fit_polyline_to_box(points, box):
     return [(along(x, min(xs), w, x0, x1), along(y, min(ys), h, y0, y1)) for x, y in points]
 
 
+STIRRUP_MERGE_GAP = 0.01  # the two middle stirrups closer than this are one
+
+
 def stirrup_zone_positions(length, zones, rest):
-    """Like `stirrup_positions`, but each stirrup tagged with its zone:
+    """Stirrups along a clear length, each tagged with its zone:
     [(offset, zone_index)], zone_index being the position in `zones`
-    ("1@.05" -> 0, "6@.10" -> 1...) or len(zones) for the rest. The two
-    ends mirror each other; a stirrup added in the middle is 'rest'."""
+    ("1@.05" -> 0, "6@.10" -> 1...) or len(zones) for the rest. Laid out
+    from each end towards the middle with the spacings as written ('1@.05,
+    5@.10, rto@.20': 0.05, then 5 at 0.10, then every 0.20), the two ends
+    mirroring each other; in the middle no gap is wider than the rest
+    spacing (one more stirrup at the middle when needed) and two stirrups
+    only merge when they practically coincide."""
     if length <= 0:
         return []
     rest_zone = len(zones)
@@ -1002,8 +980,9 @@ def stirrup_zone_positions(length, zones, rest):
         return [(half, rest_zone)]
     top = [(length - p, zone) for p, zone in reversed(bottom)]
     gap = top[0][0] - bottom[-1][0]
-    if gap < rest / 2.0:
-        bottom, top, middle = bottom[:-1], top[1:], [(half, rest_zone)]
+    if gap < STIRRUP_MERGE_GAP:
+        # the two halves meet on (almost) the same spot: one stirrup there
+        bottom, top, middle = bottom[:-1], top[1:], [(half, bottom[-1][1])]
     elif gap > rest + eps:
         middle = [(half, rest_zone)]
     else:

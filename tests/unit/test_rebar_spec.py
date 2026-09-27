@@ -55,6 +55,17 @@ class TestStirrups:
         for a, b in zip(pos, reversed(pos)):
             assert a + b == pytest.approx(2.65)
 
+    @pytest.mark.parametrize("length", [4.0, 2.5, 3.25, 2.4, 4.65, 3.4, 1.95, 2.05])
+    def test_each_end_as_written_and_no_gap_over_the_rest(self, length):
+        zones, rest = [(1, 0.05), (5, 0.10)], 0.20
+        pos = stirrup_positions(length, zones, rest)
+        ends = [0.05, 0.15, 0.25, 0.35, 0.45, 0.55]
+        assert pos[:6] == pytest.approx(ends)  # from the bottom
+        assert [length - p for p in reversed(pos)][:6] == pytest.approx(ends)  # from the top
+        gaps = [b - a for a, b in zip(pos, pos[1:])]
+        assert max(gaps) <= rest + 1e-9
+        assert min(gaps) >= 0.01 - 1e-9  # two stirrups never on the same spot
+
     def test_runs_of_constant_spacing(self):
         pos = stirrup_positions(2.65, [(1, 0.05), (10, 0.10)], 0.20)
         runs = group_runs(pos)

@@ -444,9 +444,10 @@ class Section(object):
 
 def clear_top(doc, column, section):
     """Top of the column's clear height, where its stirrup distribution
-    ends: the underside of the slab over it - also when beams frame in (the
-    user's rule: the slab's thickness is the joint) -, else the underside of
-    the deepest beam, else the column top."""
+    ends: the underside of the deepest beam framing into its top (where
+    beams of different depth meet, always the deepest one), else the
+    underside of the slab over it, else the column top. From there up to
+    the column top is the joint."""
     bb = column.get_BoundingBox(None)
     if bb is None:
         return section.z_top
@@ -492,8 +493,8 @@ def clear_top(doc, column, section):
             low = ebb.Min.Z if ebb is not None else None
         return low
 
-    for bic in (DB.BuiltInCategory.OST_Floors, DB.BuiltInCategory.OST_StructuralFraming):
-        best = section.z_top
+    for bic in (DB.BuiltInCategory.OST_StructuralFraming, DB.BuiltInCategory.OST_Floors):
+        best = section.z_top  # the lowest underside: the deepest member
         found = (
             DB.FilteredElementCollector(doc)
             .OfCategory(bic)
@@ -532,19 +533,23 @@ def _tag(rebar, column):
 
 
 def _runs(family, joint_spacing_m, section, z_clear_top):
-    """(z_start_ft, count, spacing_ft) runs of one stirrup family: its
-    clear-height distribution, plus the joint when EA_Nucleo_cm is set."""
+    """(z_start_ft, count, spacing_ft, side) runs of one stirrup family: its
+    clear-height distribution, plus the joint when EA_Nucleo_cm is set.
+    side is +1 in the lower half, -1 in the upper half: the way stirrups
+    set at one height stack (towards the middle, so the first one keeps
+    its distance from each end)."""
     clear_m = (z_clear_top - section.z_bottom) * FT
-    runs = [
-        (section.z_bottom + start / FT, n, spacing / FT)
-        for start, n, spacing in spec.group_runs(
-            spec.stirrup_positions(clear_m, family.zones, family.rest)
-        )
-    ]
+    positions = spec.stirrup_positions(clear_m, family.zones, family.rest)
+    lower = [p for p in positions if p <= clear_m / 2.0 + 1e-6]
+    upper = [p for p in positions if p > clear_m / 2.0 + 1e-6]
+    runs = []
+    for part, side in ((lower, 1), (upper, -1)):
+        for start, n, spacing in spec.group_runs(part):
+            runs.append((section.z_bottom + start / FT, n, spacing / FT, side))
     if joint_spacing_m and section.z_top - z_clear_top > 0.1 / FT:
         joint = spec.joint_positions((section.z_top - z_clear_top) * FT, joint_spacing_m)
         for start, n, spacing in spec.group_runs(joint):
-            runs.append((z_clear_top + start / FT, n, spacing / FT))
+            runs.append((z_clear_top + start / FT, n, spacing / FT, 1))
     return runs
 
 
@@ -613,9 +618,9 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark, shapes=Non
     for kind, (family, loops, ties) in groups.items():
         stirrup_type = bar_type_for(family.key)
         hook = hooks.get(family.key)
-        for z_set, n, spacing in _runs(family, column_spec.joint_spacing_m, section, z_clear_top):
+        for z_set, n, spacing, side in _runs(family, column_spec.joint_spacing_m, section, z_clear_top):
             for index, (line, is_open, shape_name) in enumerate(loops):
-                z = z_set + lift_ft[(kind, index, False)]
+                z = z_set + side * lift_ft[(kind, index, False)]
                 if is_open:
                     # U-shaped stirrup: its drawn segments, ends left
                     # straight (no hooks) unless its shape has them.
@@ -642,7 +647,7 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark, shapes=Non
                 _tag(rebar, column)
                 created.append((rebar, family.key, kind))
             for index, (a, b, shape_name) in enumerate(ties):
-                z = z_set + lift_ft[(kind, index, True)]
+                z = z_set + side * lift_ft[(kind, index, True)]
                 line = DB.Line.CreateBound(
                     section.point_m(a[0], a[1], z), section.point_m(b[0], b[1], z)
                 )
