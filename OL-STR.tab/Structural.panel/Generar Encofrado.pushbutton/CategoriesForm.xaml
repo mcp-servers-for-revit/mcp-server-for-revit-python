@@ -1,12 +1,16 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Encofrado - Categorias a procesar"
-        SizeToContent="Height" Width="500"
+        SizeToContent="Height" Width="500" MinWidth="420" MinHeight="300"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="NoResize">
-    <Grid Margin="15">
+        ResizeMode="CanResizeWithGrip">
+    <!-- Resizable: the options scroll when the window is made smaller;
+         "Continuar" stays pinned at the bottom. -->
+    <DockPanel Margin="15">
+    <Button DockPanel.Dock="Bottom" x:Name="button_continue" Content="Continuar" Height="34" Margin="0,12,0,0" Click="continue_click"/>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <Grid Margin="0,0,4,0">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -101,7 +105,7 @@
                           IsEnabled="{Binding IsChecked, ElementName=chk_soil}"/>
             </Grid>
         </StackPanel>
-
-        <Button Grid.Row="6" x:Name="button_continue" Content="Continuar" Height="34" Margin="0,12,0,0" Click="continue_click"/>
     </Grid>
+    </ScrollViewer>
+    </DockPanel>
 </Window>
