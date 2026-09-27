@@ -617,7 +617,7 @@ class AceroWindow(forms.WPFWindow):
         if tool == "rect" and self.draft and self.cursor_m:
             # Rectangle between the first corner and the cursor, with the
             # outer measures it would have.
-            rect = self._rect(self.draft[0], self.cursor_m)
+            rect = self._fitted_rect(self.draft[0], self.cursor_m)
             if rect:
                 self._polyline(frame, rect, C_DRAFT, 2, closed=True, dash=True)
                 key = self._family_key(self.kind_for["stirrup"])
@@ -642,6 +642,37 @@ class AceroWindow(forms.WPFWindow):
         if x1 - x0 < 0.02 or y1 - y0 < 0.02:
             return None
         return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+    def _cover_bounds(self):
+        """Where a rectangular stirrup's outer face must stay (the section
+        faces moved in by the cover), or None for irregular sections."""
+        t = self.by_id.get(self.state.active)
+        section = t.section if t else None
+        if section is None or not section.is_rectangle:
+            return None
+        try:
+            cover = float((self.txt_cover.Text or u"").replace(u",", u".")) / 100.0
+        except ValueError:
+            return None
+        return rs.cover_bounds(section.polygon_m, cover)
+
+    def _fitted_rect(self, a, b):
+        """Two-point stirrup between corners a and b, with its sides that
+        reach (or nearly reach) the cover line placed on it."""
+        rect = self._rect(a, b)
+        bounds = self._cover_bounds()
+        if rect is None or bounds is None:
+            return rect
+        bars = self.design["bars"]
+        key = self._family_key(self.kind_for["stirrup"])
+        wrap = rs.wrap_radius(rect, bars)
+        try:
+            outer = rs.snap_rect_to_cover(rs.outer_rect(rect, bars, key, wrap), bounds)
+            fitted = rs.rect_vertices(outer, key, wrap)
+        except rs.SpecError:
+            return rect
+        # Keep the corners on the bars they were snapped to, if any.
+        return fitted if wrap == rs.wrap_radius(fitted, bars) or wrap == 0 else rect
 
     # -- measures of the selected stirrup ------------------------------------
     def _select(self, index):
@@ -672,8 +703,7 @@ class AceroWindow(forms.WPFWindow):
         measures = rs.rect_measures(outline, section.polygon_m)
         if measures:
             self.panel_rect_fields.Visibility = Visibility.Visible
-            boxes = (self.txt_m_width, self.txt_m_height, self.txt_m_left, self.txt_m_bottom)
-            for box, value in zip(boxes, measures):
+            for box, value in zip((self.txt_m_width, self.txt_m_height), measures[:2]):
                 box.Text = u"{:.1f}".format(value * 100)
             self.txt_m_sides.Text = u""
         else:
@@ -688,12 +718,21 @@ class AceroWindow(forms.WPFWindow):
         kind, poly, wrap = self.design["stirrups"][self.selected]
         if wrap is None:
             wrap = rs.wrap_radius(poly, self.design["bars"])
-        boxes = (self.txt_m_width, self.txt_m_height, self.txt_m_left, self.txt_m_bottom)
+        key = self._family_key(kind)
         try:
-            values = [float((box.Text or u"").replace(u",", u".")) / 100.0 for box in boxes]
-            new_poly = rs.rect_from_measures(
-                values[0], values[1], values[2], values[3], t.section.polygon_m,
-                self._family_key(kind), wrap)
+            width, height = [float((box.Text or u"").replace(u",", u".")) / 100.0
+                             for box in (self.txt_m_width, self.txt_m_height)]
+            if width <= 0 or height <= 0:
+                raise ValueError()
+            outer = rs.outer_rect(poly, self.design["bars"], key, wrap)
+            bounds = self._cover_bounds()
+            if bounds:
+                # Around its own center, shifted to stay inside the cover.
+                outer = rs.resize_rect_in_cover(outer, width, height, bounds)
+            else:
+                cx, cy = (outer[0] + outer[2]) / 2.0, (outer[1] + outer[3]) / 2.0
+                outer = (cx - width / 2.0, cy - height / 2.0, cx + width / 2.0, cy + height / 2.0)
+            new_poly = rs.rect_vertices(outer, key, wrap)
         except ValueError:
             forms.alert(u"Escribe las medidas en cm (ej. 22 o 22.5).", title="Acero")
             return
@@ -746,7 +785,7 @@ class AceroWindow(forms.WPFWindow):
             if not self.draft:
                 self.draft = [point]
             else:
-                rect = self._rect(self.draft[0], point)
+                rect = self._fitted_rect(self.draft[0], point)
                 if rect:
                     self.draft = rect
                     self._close_stirrup()

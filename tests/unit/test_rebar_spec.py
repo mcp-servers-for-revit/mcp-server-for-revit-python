@@ -219,3 +219,33 @@ class TestMeasures:
 
         with pytest.raises(SpecError):
             rect_from_measures(0.02, 0.30, 0.05, 0.05, self.section, '3/8"', 0.008)
+
+
+class TestCoverFit:
+    section = [(-0.15, -0.40), (0.15, -0.40), (0.15, 0.40), (-0.15, 0.40)]
+
+    def test_drawn_sides_land_on_the_cover(self):
+        from revit_mcp.rebar_spec import cover_bounds, snap_rect_to_cover
+
+        bounds = cover_bounds(self.section, 0.04)  # (-0.11, -0.36, 0.11, 0.36)
+        # left side 1 cm inside the cover line, top 1 cm past it: both snap;
+        # the bottom is 40 cm away and stays
+        got = snap_rect_to_cover((-0.10, 0.0, 0.05, 0.37), bounds)
+        assert got == (pytest.approx(-0.11), 0.0, 0.05, pytest.approx(0.36))
+
+    def test_resize_stays_inside(self):
+        from revit_mcp.rebar_spec import cover_bounds, resize_rect_in_cover
+
+        bounds = cover_bounds(self.section, 0.04)
+        got = resize_rect_in_cover((-0.11, 0.20, 0.11, 0.36), 0.22, 0.30, bounds)
+        assert got == (pytest.approx(-0.11), pytest.approx(0.06), pytest.approx(0.11), pytest.approx(0.36))
+        # wider than fits -> clamped to the space inside the cover
+        got = resize_rect_in_cover((-0.05, 0.0, 0.05, 0.1), 0.50, 0.10, bounds)
+        assert got[2] - got[0] == pytest.approx(0.22)
+
+    def test_vertices_roundtrip(self):
+        from revit_mcp.rebar_spec import outer_rect, rect_vertices
+
+        rect = (-0.11, -0.36, 0.11, 0.36)
+        pts = rect_vertices(rect, '3/8"', 0.0079375)
+        assert outer_rect(pts, [], '3/8"', 0.0079375) == tuple(pytest.approx(v) for v in rect)

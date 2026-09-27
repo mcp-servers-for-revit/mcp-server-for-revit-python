@@ -550,3 +550,59 @@ def auto_tie(click, bars, tol=0.01):
     if best is None:
         raise SpecError(u"No hay dos barras enfrentadas para la grapa")
     return best[1], best[2]
+
+
+# --- Fitting rectangular stirrups to the cover --------------------------------
+# Rectangles here are (x0, y0, x1, y1) of a stirrup's outer face.
+
+COVER_SNAP = 0.025  # a drawn side this close to the cover line lands on it
+
+
+def cover_bounds(section_polygon, cover):
+    """Rectangle a stirrup's outer face must stay inside: the section's
+    bounding faces moved in by the cover."""
+    xs = [x for x, _ in section_polygon]
+    ys = [y for _, y in section_polygon]
+    return min(xs) + cover, min(ys) + cover, max(xs) - cover, max(ys) - cover
+
+
+def snap_rect_to_cover(rect, bounds, snap=COVER_SNAP):
+    """A drawn stirrup: each side that crosses the cover line, or is within
+    `snap` of it, is placed on it."""
+    x0, y0, x1, y1 = rect
+    bx0, by0, bx1, by1 = bounds
+    x0 = bx0 if x0 - bx0 <= snap else x0
+    y0 = by0 if y0 - by0 <= snap else y0
+    x1 = bx1 if bx1 - x1 <= snap else x1
+    y1 = by1 if by1 - y1 <= snap else y1
+    return x0, y0, x1, y1
+
+
+def resize_rect_in_cover(rect, width, height, bounds):
+    """A stirrup resized to width x height around its own center, then
+    shifted (and if needed shrunk) so it stays inside the cover."""
+    bx0, by0, bx1, by1 = bounds
+    width = min(width, bx1 - bx0)
+    height = min(height, by1 - by0)
+    cx, cy = (rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0
+    x0 = min(max(cx - width / 2.0, bx0), bx1 - width)
+    y0 = min(max(cy - height / 2.0, by0), by1 - height)
+    return x0, y0, x0 + width, y0 + height
+
+
+def rect_vertices(rect, stirrup_key, wrap):
+    """Drawn vertices (through the wrapped bar centers) of a stirrup whose
+    outer face is `rect`."""
+    inset = wrap + BAR_DIAMETERS_MM[stirrup_key] / 1000.0
+    x0, y0, x1, y1 = rect[0] + inset, rect[1] + inset, rect[2] - inset, rect[3] - inset
+    if x1 - x0 < 0.01 or y1 - y0 < 0.01:
+        raise SpecError(u"Medidas demasiado pequenas para ese diametro")
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+
+def outer_rect(vertices, bars, stirrup_key, wrap=None):
+    """(x0, y0, x1, y1) of a stirrup's outer face."""
+    outline = stirrup_outline(vertices, bars, stirrup_key, wrap)
+    xs = [x for x, _ in outline]
+    ys = [y for _, y in outline]
+    return min(xs), min(ys), max(xs), max(ys)

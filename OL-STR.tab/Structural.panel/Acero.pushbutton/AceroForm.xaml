@@ -144,11 +144,8 @@
                             <TextBox x:Name="txt_m_width" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
                             <TextBlock Text="Alto " VerticalAlignment="Center"/>
                             <TextBox x:Name="txt_m_height" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
-                            <TextBlock Text="A cara izq. " VerticalAlignment="Center"/>
-                            <TextBox x:Name="txt_m_left" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
-                            <TextBlock Text="A cara inf. " VerticalAlignment="Center"/>
-                            <TextBox x:Name="txt_m_bottom" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
-                            <Button Content="Aplicar" Width="65" Click="measures_apply"/>
+                            <Button Content="Aplicar" Width="65" Click="measures_apply"
+                                    ToolTip="Cambia el tama&#241;o alrededor de su centro, sin salir del recubrimiento."/>
                         </StackPanel>
                         <TextBlock x:Name="txt_m_sides" VerticalAlignment="Center" Foreground="#FF404040"/>
                     </WrapPanel>
