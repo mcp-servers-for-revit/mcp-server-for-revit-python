@@ -86,6 +86,62 @@ def bar_weight_kg_per_m(diameter_key):
     return STEEL_DENSITY_KG_M3 * math.pi * d * d / 4.0
 
 
+MAX_BAR_LENGTH = 9.0  # m, the commercial bar length
+CRANK_SLOPE = 6.0  # a lapping bar is cranked 1:6 (run per unit of offset)
+
+
+def splice_pieces(bar_start, bar_end, stories, lap, max_length=MAX_BAR_LENGTH):
+    """Where a longitudinal bar running the whole stacked column (bar_start
+    .. bar_end, m) is cut into bars of at most `max_length`, lapping `lap`.
+    Each lap lies in the central half of a story's clear height
+    (`stories`: [(clear_start, clear_end)], m) - outside the confinement
+    zones -, as high as the bar length allows.
+    Returns ([(start, end)] pieces bottom up, each overlapping the next by
+    `lap`; warnings) - a warning when no story fits a lap (then the cut
+    goes at the maximum length)."""
+    eps = 1e-6
+    pieces, warnings = [], []
+    if lap >= max_length:
+        return [(bar_start, bar_end)], [u"el empalme ({:.2f} m) no puede ser mayor que la barra ({:.2f} m)"
+                                        .format(lap, max_length)]
+    zones = []  # central halves, highest first
+    for b, c in stories:
+        quarter = (c - b) / 4.0
+        zones.append((b + quarter, c - quarter))
+    zones.sort(key=lambda z: -z[1])
+    start = bar_start
+    while bar_end - start > max_length + eps:
+        limit = start + max_length
+        end = None
+        for lo, hi in zones:
+            e = min(limit, hi)
+            if e - lap >= lo - eps and e - lap > start + eps:
+                end = e
+                break
+        if end is None:
+            end = limit
+            warnings.append(u"no hay un tramo central de piso donde quepa un empalme de {:.2f} m; "
+                            u"se empalma a {:.2f} m".format(lap, end))
+        pieces.append((start, end))
+        start = end - lap
+    pieces.append((start, bar_end))
+    return pieces, warnings
+
+
+def bar_piece_points(x, y, diameter, z_start, z_end, lap, cranked):
+    """Points (x, y, z) of one piece of a spliced longitudinal bar at plan
+    position (x, y): straight, or - `cranked`, the lower bar of a lap -
+    bent 1:6 one bar diameter towards the section center just before the
+    lap, so it runs beside the upper bar there."""
+    r = math.hypot(x, y)
+    ux, uy = (-x / r, -y / r) if r > 1e-6 else (1.0, 0.0)
+    crank_from = z_end - lap - CRANK_SLOPE * diameter
+    if not cranked or crank_from <= z_start + 0.01:
+        return [(x, y, z_start), (x, y, z_end)]
+    ix, iy = x + ux * diameter, y + uy * diameter
+    return [(x, y, z_start), (x, y, crank_from), (ix, iy, z_end - lap), (ix, iy, z_end)]
+
+
 def stack_lifts(items):
     """How far (m) each stirrup/tie is raised over its set height so the
     ones set at the same height lie stacked, touching, like on site, not

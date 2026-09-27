@@ -80,6 +80,43 @@ def save_bar_slots(keys):
         pass
 
 
+def load_splice_settings():
+    """{"on": bool, "max": m, "laps": {diameter key: cm}} - the lap splice
+    settings of the window (pyRevit settings of this button)."""
+    settings = {"on": False, "max": rs.MAX_BAR_LENGTH, "laps": {}}
+    try:
+        config = script.get_config()
+        settings["on"] = (config.get_option("splice_on", u"0") or u"0") == u"1"
+        settings["max"] = float(config.get_option("splice_max", u"") or rs.MAX_BAR_LENGTH)
+        for pair in (config.get_option("splice_laps", u"") or u"").split(u"|"):
+            if u"=" in pair:
+                key, cm = pair.split(u"=", 1)
+                settings["laps"][rs.parse_diameter(key)] = float(cm)
+    except Exception:
+        pass
+    return settings
+
+
+def save_splice_settings(settings):
+    try:
+        config = script.get_config()
+        config.splice_on = u"1" if settings["on"] else u"0"
+        config.splice_max = u"{}".format(settings["max"])
+        config.splice_laps = u"|".join(u"{}={}".format(k.replace(u'"', u"pulg"), v)
+                                       for k, v in sorted(settings["laps"].items()))
+        script.save_config()
+    except Exception:
+        pass
+
+
+def splice_for_generation(settings):
+    """What rc.generate_stack takes: None when splicing is off, else
+    {"max": m, "laps": {key: m}}."""
+    if not settings["on"]:
+        return None
+    return {"max": settings["max"], "laps": dict((k, cm / 100.0) for k, cm in settings["laps"].items())}
+
+
 SNAP_PX = 12  # a click this close to a bar snaps to it
 MARGIN_PX = 30
 
@@ -264,6 +301,7 @@ class AceroWindow(forms.WPFWindow):
             cbo.SelectedItem = key
         self._filling_bars = False
         self.bar_key = self.cbo_bar_2.SelectedItem
+        self._fill_splice()
         self._updating_steel = False
         self.selected = None  # index of the stirrup whose measures are shown
         # Plan / elevation / 3D views: zoom-pan state and what they last showed.
@@ -652,6 +690,60 @@ class AceroWindow(forms.WPFWindow):
         self._refresh_steel()
         self.redraw()
 
+    # -- lap splices of the longitudinal bars ---------------------------------
+    def _fill_splice(self):
+        """"3. Empalme": the switch, the maximum bar length and one box per
+        diameter, as last saved."""
+        self._filling_splice = True
+        try:
+            settings = load_splice_settings()
+            self.chk_splice.IsChecked = settings["on"]
+            self.txt_splice_max.Text = u"{:g}".format(settings["max"])
+            self.lap_boxes = {}
+            self.panel_laps.Children.Clear()
+            for key in rs.bar_diameter_keys():
+                cell = StackPanel()
+                cell.Orientation = Orientation.Horizontal
+                cell.Margin = Thickness(0, 0, 8, 4)
+                label = TextBlock()
+                label.Text = u"Ø{} ".format(key)
+                label.Width = 44
+                label.VerticalAlignment = VerticalAlignment.Center
+                box = TextBox()
+                box.Width = 38
+                cm = settings["laps"].get(key)
+                box.Text = u"{:g}".format(cm) if cm else u""
+                box.TextChanged += self.splice_changed
+                cell.Children.Add(label)
+                cell.Children.Add(box)
+                self.panel_laps.Children.Add(cell)
+                self.lap_boxes[key] = box
+        finally:
+            self._filling_splice = False
+
+    def _splice_from_form(self):
+        """The splice settings as typed ({"on", "max", "laps"}); boxes that
+        don't read as a number are left out."""
+        settings = {"on": bool(self.chk_splice.IsChecked), "max": rs.MAX_BAR_LENGTH, "laps": {}}
+        try:
+            settings["max"] = float((self.txt_splice_max.Text or u"").replace(u",", u".")) or rs.MAX_BAR_LENGTH
+        except ValueError:
+            pass
+        for key, box in self.lap_boxes.items():
+            try:
+                cm = float((box.Text or u"").replace(u",", u"."))
+            except ValueError:
+                continue
+            if cm > 0:
+                settings["laps"][key] = cm
+        return settings
+
+    def splice_changed(self, sender, args):
+        if getattr(self, "_filling_splice", True):
+            return
+        save_splice_settings(self._splice_from_form())
+        self.redraw()  # the stacked views show the laps
+
     def bar_slot_changed(self, sender, args):
         """A diameter chosen in one of the four "Barras" options: it is
         remembered, and that option becomes the bar tool."""
@@ -882,7 +974,9 @@ class AceroWindow(forms.WPFWindow):
                 self.cursor_m, self.cursor_on_bar) is None
             self._dot(frame, self.cursor_m[0], self.cursor_m[1], 4 if refused else 3,
                       C_REFUSED if refused else C_CURSOR)
+        splice_now = self._splice_from_form() if hasattr(self, "lap_boxes") else None
         signature = (self.state.active, tuple(id_of(c.Id) for c in self._view_columns),
+                     repr(sorted(splice_now.items())) if splice_now else None,
                      rs.design_to_text(self.design),
                      tuple(sorted(self._get_form().items())))
         if signature != self._views_sig:
@@ -1356,6 +1450,25 @@ class AceroWindow(forms.WPFWindow):
                 loops.append((kind, [(x + dx, y + dy) for x, y in line], closed, zs,
                               rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
         top = max(s["z"] + s["height"] for s in segments)
+        # Stacked columns with continuous bars: the pieces and laps the
+        # generation will make (rc.generate_stack).
+        splice = splice_for_generation(self._splice_from_form()) if hasattr(self, "lap_boxes") else None
+        bar_paths, laps = None, []
+        if splice and len(segments) > 1:
+            missing = sorted(set(k for _, _, k in bars if k not in splice["laps"]))
+            if missing and top > splice["max"] + 1e-6:
+                messages.append(u"Falta la longitud de empalme de " + u", ".join(missing))
+            else:
+                bar_paths = []
+                stories = [(s["z"], s["z"] + s["clear"]) for s in segments]
+                for x, y, key in bars:
+                    lap = splice["laps"].get(key, 0.0)
+                    pieces, _ = rs.splice_pieces(0.0, top, stories, lap, splice["max"])
+                    d = rs.BAR_DIAMETERS_MM[key] / 1000.0
+                    for i, (a, b) in enumerate(pieces):
+                        bar_paths.append((rs.bar_piece_points(x, y, d, a, b, lap, i < len(pieces) - 1), d / 2.0))
+                        if i < len(pieces) - 1:
+                            laps.append((round(b - lap, 3), round(b, 3), key))
         xs = [p[0] for p in base.polygon_m]
         elev = {
             "width": max(xs) - min(xs),
@@ -1364,6 +1477,7 @@ class AceroWindow(forms.WPFWindow):
             "message": messages[0] if messages else None,
             "neighbors": neighbors,
             "segments": segments,
+            "laps": sorted(set(laps)),
         }
         if len(segments) == 1:  # the single-column keys too
             elev.update(dict((k, segments[0][k]) for k in ("clear", "edge", "conf", "joint")))
@@ -1374,6 +1488,7 @@ class AceroWindow(forms.WPFWindow):
             "loops": loops,
             "neighbors": neighbors,
             "segments": segments,
+            "bar_paths": bar_paths,
         }
         return elev, scene
 
@@ -1881,6 +1996,32 @@ if not with_spec:
     )
     script.exit()
 
+splice = splice_for_generation(load_splice_settings())
+if splice is None:
+    stacks = [[c] for c in with_spec]
+else:
+    # Continuous bars run a whole stack (same type and axis, all levels):
+    # every column of a stack holding one of the targets is built with it.
+    wanted = set(id_of(c.Id) for c in with_spec)
+    stacks = [s for s in rc.column_stacks([c for type_id in specs for c in by_id[type_id].columns])
+              if any(id_of(c.Id) in wanted for c in s)]
+    added = sum(len(s) for s in stacks) - len(with_spec)
+    with_spec = [c for s in stacks for c in s]
+    if added:
+        scope_label += u" (+{} de sus pilas: barras continuas)".format(added)
+    missing = set()
+    for s in stacks:
+        length = (rc.Section(s[-1]).z_top - rc.Section(s[0]).z_bottom) * rc.FT
+        if length > splice["max"] + 1e-6:
+            missing |= set(k for _, _, k in specs[id_of(s[0].GetTypeId())].design["bars"]
+                           if k not in splice["laps"])
+    if missing:
+        forms.alert(
+            u"Falta la longitud de empalme de: {}.\n\nEscribela en '3. Empalme de barras "
+            u"longitudinales' de la ventana Acero.".format(u", ".join(sorted(missing))),
+            title="Acero")
+        script.exit()
+
 mode = forms.CommandSwitchWindow.show(
     ["Vista previa (sin cambios en el modelo)", "Generar barras y metrado"],
     message=u"Modo de ejecucion ({} columnas, {}):".format(len(with_spec), scope_label),
@@ -1904,20 +2045,25 @@ try:
     rc.ensure_parameters(doc)
     done = []
     with forms.ProgressBar(title="Acero: {value} de {max_value} columnas") as pb:
-        for i, column in enumerate(with_spec):
-            ct = by_id[id_of(column.GetTypeId())]
+        count = 0
+        for stack in stacks:
+            ct = by_id[id_of(stack[0].GetTypeId())]
             sub = DB.SubTransaction(doc)
             sub.Start()
             try:
-                created = rc.generate_column(
-                    doc, column, specs[ct.id], bar_types, hooks, rc.type_mark(ct.name), rebar_shapes
+                created, found = rc.generate_stack(
+                    doc, stack, specs[ct.id], bar_types, hooks, rc.type_mark(ct.name), rebar_shapes, splice
                 )
                 sub.Commit()
-                done.append((column, ct.name, created))
+                done += [(column, ct.name, created[id_of(column.Id)]) for column in stack]
+                warnings += [u"{} (columnas {}): {}".format(ct.name, u", ".join(str(id_of(c.Id)) for c in stack), w)
+                             for w in found]
             except Exception as e:
                 sub.RollBack()
-                warnings.append(u"Columna {} ({}): {}".format(id_of(column.Id), ct.name, e))
-            pb.update_progress(i + 1, len(with_spec))
+                warnings.append(u"Columna(s) {} ({}): {}".format(
+                    u", ".join(str(id_of(c.Id)) for c in stack), ct.name, e))
+            count += len(stack)
+            pb.update_progress(count, len(with_spec))
 
     doc.Regenerate()  # bar lengths are only known after a regeneration
     for column, type_name, created in done:
@@ -1965,8 +2111,11 @@ output.print_md("| **Total** | | **{:.2f}** | **{:.2f}** | **{:.2f}** | **{:.2f}
     grand[rc.LONGITUDINAL], grand[rc.EDGE], grand[rc.CONFINEMENT], sum(grand.values())))
 
 output.print_md(
-    "\n*Longitudinales rectas de piso a piso (sin empalmes ni anclajes). "
-    "Estribos en la luz libre, distribuidos desde cada extremo: desde la base hasta el "
+    (u"\n*Longitudinales continuas en cada pila de columnas, en barras de hasta {:g} m con "
+     u"empalme en la mitad central de un piso (la barra inferior con bayoneta 1:6); el peso "
+     u"de cada barra se reparte entre las columnas que recorre. ".format(splice["max"])
+     if splice else u"\n*Longitudinales rectas de piso a piso (sin empalmes ni anclajes). ")
+    + u"Estribos en la luz libre, distribuidos desde cada extremo: desde la base hasta el "
     "fondo de la viga de mayor peralte (o la cara inferior de la losa si no hay viga); "
     "en el nucleo si se configuro.*"
 )

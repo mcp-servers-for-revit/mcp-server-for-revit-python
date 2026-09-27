@@ -62,7 +62,28 @@ Código: `revit_mcp/rebar_spec.py` → `stack_lifts`; `rebar_columns.py` → `_r
 
 Código: `revit_mcp/rebar_spec.py` → `place_bar`.
 
-## 5. Pesos
+## 5. Empalme de barras longitudinales (opcional)
+
+Se activa en la ventana, sección **3. Empalme de barras longitudinales**; los
+valores se guardan en la configuración del usuario.
+
+- Las barras longitudinales son **continuas en cada pila de columnas**: las
+  del mismo tipo, en el mismo eje, una sobre otra (todos los niveles). Al
+  generar una columna de la pila se genera la pila completa.
+- Cada barra mide como máximo la **longitud máxima** (9 m por defecto). Al
+  superarla se corta con un **empalme** de la longitud indicada para su
+  diámetro (en cm).
+- El empalme va en la **mitad central de la luz libre de un piso** (fuera de
+  las zonas de confinamiento), lo más arriba que permita la longitud máxima.
+- La barra inferior del empalme termina con una **bayoneta 1:6** que la mete
+  un diámetro hacia el centro: las dos barras quedan juntas en el traslape,
+  sin atravesarse; la superior sigue pegada al estribo.
+- El peso de cada barra se reparte entre las columnas que recorre.
+
+Código: `revit_mcp/rebar_spec.py` → `splice_pieces`, `bar_piece_points`;
+`rebar_columns.py` → `column_stacks`, `generate_stack`.
+
+## 6. Pesos
 
 - El metrado usa el **peso nominal** de
   `revit_mcp/data/acero_pesos_por_diametro.csv`.

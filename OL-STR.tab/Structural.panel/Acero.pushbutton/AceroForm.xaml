@@ -82,6 +82,23 @@
                     </Grid>
                 </GroupBox>
 
+                <!-- Lap splices of the longitudinal bars (settings kept per user) -->
+                <Expander DockPanel.Dock="Bottom" Header="3. Empalme de barras longitudinales" Margin="0,8,0,0">
+                    <StackPanel Margin="6,4,6,4">
+                        <CheckBox x:Name="chk_splice" Click="splice_changed"
+                                  Content="Barras continuas en columnas apiladas, con empalme"
+                                  ToolTip="Las barras longitudinales siguen por todas las columnas del mismo tipo y eje (todos los niveles); cuando superan la longitud maxima se cortan con un empalme en la mitad central de un piso."/>
+                        <StackPanel Orientation="Horizontal" Margin="18,4,0,4"
+                                    IsEnabled="{Binding IsChecked, ElementName=chk_splice}">
+                            <TextBlock Text="Longitud maxima de barra: " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_splice_max" Width="45" TextChanged="splice_changed"/>
+                            <TextBlock Text=" m" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="Longitud de empalme por diametro (cm):" Margin="0,2,0,2"/>
+                        <WrapPanel x:Name="panel_laps" IsEnabled="{Binding IsChecked, ElementName=chk_splice}"/>
+                    </StackPanel>
+                </Expander>
+
                 <ListBox x:Name="list_types" SelectionMode="Single" SelectionChanged="type_selected"/>
             </DockPanel>
 

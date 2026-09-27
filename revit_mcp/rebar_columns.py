@@ -29,6 +29,7 @@ bar carries its column's id in EA_Origen_Id so a new run replaces it.
 
 Runs inside Revit's IronPython engine - no f-strings.
 """
+import math
 import re
 
 from pyrevit import DB
@@ -560,27 +561,33 @@ def _set(rebar, n, spacing_ft):
         )
 
 
-def generate_column(doc, column, column_spec, bar_types, hooks, mark, shapes=None):
+def _bar_type(bar_types, key, mark):
+    bar_type = bar_types.pick(key, mark)
+    if bar_type is None:
+        raise spec.SpecError(u"no hay tipo de barra de {}".format(key))
+    return bar_type
+
+
+def generate_column(doc, column, column_spec, bar_types, hooks, mark, shapes=None, longitudinal=True):
     """Create the column's longitudinal bars, stirrups and ties from its
     drawing (inside an active Transaction; Revit needs a Regenerate before
     their lengths are known, see `record_weight`). Perimeter stirrups use
     the edge ("borde") settings; inner stirrups and ties the confinement
     ones; each takes the rebar shape it was drawn with (`shapes`, a
-    RebarShapes) when it has one. Returns [(rebar, diameter_key, kind)]."""
+    RebarShapes) when it has one. `longitudinal`=False leaves the vertical
+    bars out (a stack makes them continuous, see `generate_stack`).
+    Returns [(rebar, diameter_key, kind)]."""
     section = Section(column)
     design = column_spec.design
 
     def bar_type_for(key):
-        bar_type = bar_types.pick(key, mark)
-        if bar_type is None:
-            raise spec.SpecError(u"no hay tipo de barra de {}".format(key))
-        return bar_type
+        return _bar_type(bar_types, key, mark)
 
     delete_generated(doc, column)
     created = []
 
     normal = section.transform.BasisX
-    for x, y, key in design["bars"]:
+    for x, y, key in (design["bars"] if longitudinal else []):
         line = DB.Line.CreateBound(
             section.point_m(x, y, section.z_bottom), section.point_m(x, y, section.z_top)
         )
@@ -661,6 +668,101 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark, shapes=Non
     return created
 
 
+# --- Stacked columns: continuous longitudinal bars, lap spliced -------------------
+
+def column_stacks(columns, xy_tol_m=0.02, z_tol_m=0.10):
+    """The columns grouped into stacks: same type, same axis and turned the
+    same way, each standing on the one below (its base within `z_tol_m` of
+    that one's top). Returns [[column, ...] bottom up]; a lone column is a
+    stack of one."""
+    info = []
+    for column in columns:
+        try:
+            section = Section(column)
+        except Exception:
+            continue
+        info.append((section.z_bottom, column, section))
+    info.sort(key=lambda item: item[0])
+    stacks = []  # [(columns, last section)]
+    for _, column, section in info:
+        axis = section.point_m(0.0, 0.0, section.z_bottom)
+        placed = False
+        for stack in stacks:
+            last_column, last = stack[0][-1], stack[1]
+            below = last.point_m(0.0, 0.0, last.z_top)
+            if (last_column.GetTypeId() == column.GetTypeId()
+                    and abs(section.z_bottom - last.z_top) * FT <= z_tol_m
+                    and math.hypot(axis.X - below.X, axis.Y - below.Y) * FT <= xy_tol_m
+                    and section.transform.BasisX.IsAlmostEqualTo(last.transform.BasisX, 1e-3)):
+                stack[0].append(column)
+                stack[1] = section
+                placed = True
+                break
+        if not placed:
+            stacks.append([[column], section])
+    return [columns_ for columns_, _ in stacks]
+
+
+def generate_stack(doc, stack, column_spec, bar_types, hooks, mark, shapes=None, splice=None):
+    """Create the rebar of a stack of columns (`column_stacks`, bottom up):
+    each column's stirrups and ties (`generate_column`), and longitudinal
+    bars running the whole stack, cut into bars of at most splice["max"] m
+    lapping splice["laps"][diameter key] m, each lap in the central half of
+    a story's clear height (spec.splice_pieces). The lower bar of a lap is
+    cranked 1:6 one bar diameter towards the section center, so the two
+    bars lie side by side, touching. Every piece is hosted by (and tagged
+    with) the column holding its middle. `splice` None: per-column bars as
+    before. Returns ({column id: [(rebar, key, kind[, share])]},
+    warnings): a longitudinal bar is listed in every column it runs
+    through, with the share of its length there (see `record_weight`)."""
+    if splice is None:
+        return dict((element_id_value(c.Id), generate_column(doc, c, column_spec, bar_types, hooks, mark, shapes))
+                    for c in stack), []
+    created = {}
+    for column in stack:
+        created[element_id_value(column.Id)] = generate_column(
+            doc, column, column_spec, bar_types, hooks, mark, shapes, longitudinal=False)
+    sections = [Section(c) for c in stack]
+    base = sections[0]
+    z0_ft = base.z_bottom
+    total = (sections[-1].z_top - z0_ft) * FT
+    stories = [((s.z_bottom - z0_ft) * FT, (clear_top(doc, c, s) - z0_ft) * FT) for c, s in zip(stack, sections)]
+    tops = [(s.z_top - z0_ft) * FT for s in sections]
+    warnings = []
+    for x, y, key in column_spec.design["bars"]:
+        lap = splice["laps"].get(key)
+        if lap is None:
+            if total > splice["max"] + 1e-6:
+                raise spec.SpecError(u"falta la longitud de empalme de las barras de {}".format(key))
+            lap = 0.0
+        pieces, found = spec.splice_pieces(0.0, total, stories, lap, splice["max"])
+        warnings += [u"Barras de {}: {}".format(key, w) for w in found]
+        d = spec.BAR_DIAMETERS_MM[key] / 1000.0
+        r = math.hypot(x, y)
+        ux, uy = (-x / r, -y / r) if r > 1e-6 else (1.0, 0.0)  # towards the center
+        crank_normal = DB.XYZ.BasisZ.CrossProduct(base.transform.OfVector(DB.XYZ(ux, uy, 0.0))).Normalize()
+        for index, (z_start, z_end) in enumerate(pieces):
+            path = spec.bar_piece_points(x, y, d, z_start, z_end, lap, index < len(pieces) - 1)
+            points = [base.point_m(px, py, z0_ft + pz / FT) for px, py, pz in path]
+            normal = crank_normal if len(points) > 2 else base.transform.BasisX
+            middle = (z_start + z_end) / 2.0
+            host = stack[next((k for k, top in enumerate(tops) if middle <= top + 1e-6), len(stack) - 1)]
+            rebar = Rebar.CreateFromCurves(
+                doc, RebarStyle.Standard, _bar_type(bar_types, key, mark), None, None, host, normal,
+                List[DB.Curve]([DB.Line.CreateBound(points[k], points[k + 1]) for k in range(len(points) - 1)]),
+                RebarHookOrientation.Right, RebarHookOrientation.Right, True, True,
+            )
+            _tag(rebar, host)
+            bottom = 0.0
+            for column, top in zip(stack, tops):
+                inside = min(z_end, top) - max(z_start, bottom)
+                if inside > 1e-6:
+                    created[element_id_value(column.Id)].append(
+                        (rebar, key, LONGITUDINAL, inside / (z_end - z_start)))
+                bottom = top
+    return created, warnings
+
+
 def _counterclockwise(points):
     area = 0.0
     for k in range(len(points)):
@@ -693,9 +795,14 @@ def record_weight(column, created):
     section = Section(column)
     inverse = section.transform.Inverse
     tol = 0.0015  # m
-    for rebar, key, kind in created:
-        kg_by_kind[kind] += rebar.TotalLength * FT * spec.bar_weight_kg_per_m(key)
-        bars += rebar.Quantity
+    for item in created:
+        # (rebar, key, kind[, share]): a bar running several stacked columns
+        # weighs in each one by the share of its length inside it
+        rebar, key, kind = item[:3]
+        share = item[3] if len(item) > 3 else 1.0
+        kg_by_kind[kind] += rebar.TotalLength * FT * spec.bar_weight_kg_per_m(key) * share
+        if rebar.GetHostId() == column.Id:
+            bars += rebar.Quantity
         if kind == LONGITUDINAL or stick_out:
             continue
         radius = spec.BAR_DIAMETERS_MM[key] / 2000.0

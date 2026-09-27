@@ -142,6 +142,60 @@ def test_weight_table_matches_the_supplier_table():
     assert bar_weight_kg_per_m('1/4"') == pytest.approx(0.249, abs=0.001)
 
 
+class TestSplices:
+    # the C-8 stack: CIST 0..3.45 (clear 0..3.25), S02 3.45..6.15 (clear
+    # to 5.55), S01 6.15..10.95 (clear to 10.15)
+    stories = [(0.0, 3.25), (3.45, 5.55), (6.15, 10.15)]
+
+    def test_short_bar_is_not_cut(self):
+        from revit_mcp.rebar_spec import splice_pieces
+
+        assert splice_pieces(0.0, 8.5, self.stories, 0.75) == ([(0.0, 8.5)], [])
+
+    def test_lap_in_the_central_half_of_a_story(self):
+        from revit_mcp.rebar_spec import splice_pieces
+
+        pieces, warnings = splice_pieces(0.0, 10.95, self.stories, 0.75)
+        assert not warnings
+        assert len(pieces) == 2
+        (s0, e0), (s1, e1) = pieces
+        assert s0 == 0.0 and e1 == 10.95
+        assert e0 - s0 <= 9.0 and e1 - s1 <= 9.0
+        assert e0 - s1 == pytest.approx(0.75)  # the lap
+        # inside the central half of S01's clear height (7.15 .. 9.15)
+        assert 7.15 - 1e-9 <= s1 and e0 <= 9.15 + 1e-9
+        assert e0 == pytest.approx(9.0)  # as high as the 9 m bar allows
+
+    def test_every_piece_within_the_maximum(self):
+        from revit_mcp.rebar_spec import splice_pieces
+
+        stories = [(k * 3.0, k * 3.0 + 2.4) for k in range(8)]  # 8 floors of 3 m
+        pieces, warnings = splice_pieces(0.0, 24.0, stories, 0.60)
+        assert not warnings
+        assert all(e - s <= 9.0 + 1e-9 for s, e in pieces)
+        for (_, e), (s, _) in zip(pieces, pieces[1:]):
+            assert e - s == pytest.approx(0.60)
+            k = int(s // 3.0)
+            assert k * 3.0 + 0.6 - 1e-9 <= s and e <= k * 3.0 + 1.8 + 1e-9  # central half
+
+    def test_lower_bar_cranked_one_diameter_inwards(self):
+        from revit_mcp.rebar_spec import bar_piece_points
+
+        d = 0.015875
+        pts = bar_piece_points(0.1, 0.0, d, 0.0, 9.0, 0.75, True)
+        assert pts[0] == pytest.approx((0.1, 0.0, 0.0))
+        assert pts[1] == pytest.approx((0.1, 0.0, 9.0 - 0.75 - 6 * d))  # crank starts 1:6 before the lap
+        assert pts[2] == pytest.approx((0.1 - d, 0.0, 8.25))  # one diameter towards the center
+        assert pts[3] == pytest.approx((0.1 - d, 0.0, 9.0))
+        assert bar_piece_points(0.1, 0.0, d, 8.25, 10.95, 0.75, False) == [(0.1, 0.0, 8.25), (0.1, 0.0, 10.95)]
+
+    def test_no_room_for_the_lap_warns(self):
+        from revit_mcp.rebar_spec import splice_pieces
+
+        pieces, warnings = splice_pieces(0.0, 10.0, [(0.0, 1.0), (1.2, 2.2)], 0.75)
+        assert warnings and pieces[0] == (0.0, 9.0)
+
+
 def test_a_diameter_added_to_the_table_becomes_known(tmp_path, monkeypatch):
     import revit_mcp.rebar_spec as rs
 

@@ -56,6 +56,8 @@ C_NEIGHBOR_EDGE = _brush(150, 155, 162)
 C_NEIGHBOR_TEXT = _brush(90, 95, 105)
 C_TEXT = _brush(40, 40, 40)
 C_DIM = _brush(40, 110, 220)
+C_LAP = _brush(220, 60, 60, 70)  # lap splice zone, see-through
+C_LAP_TEXT = _brush(190, 40, 40)
 
 
 # --- zoom / pan for the 2D canvases ------------------------------------------
@@ -405,6 +407,18 @@ def draw_elevation(canvas, data, frame):
             _line(canvas, frame, (cx - half + 0.01, clear + offset), (cx + half - 0.01, clear + offset),
                   C_EDGE, 2)
 
+    # lap splices of the continuous bars: a band over the column, and one
+    # label per cut (the diameters lapping there, each with its length)
+    cx = segments[0]["x"] * widen
+    cuts = {}
+    for z0, z1, key in data.get("laps", []):
+        _rect(canvas, frame, cx - half, z0, cx + half, z1, C_LAP)
+        cuts.setdefault(z1, []).append((z0, key))
+    for z1, items in sorted(cuts.items()):
+        label = u"Empalme " + u" / ".join(u"Ø{} {:.2f}".format(key, z1 - z0) for z0, key in sorted(items))
+        _text(canvas, frame, cx + half + 0.03, z1 - min(z1 - z0 for z0, _ in items) / 2.0,
+              label, brush=C_LAP_TEXT, size=10, anchor="left")
+
     _dimensions(canvas, frame, data)
     # below everything (a footing under the base included), one line each
     floor, u = _floor(data), _elevation_unit(data)
@@ -580,10 +594,16 @@ class Scene3D(object):
             colors = dict((k, _color(50, 50, 50)) for k in colors)
         meshes = dict((k, MeshGeometry3D()) for k in colors)
         segments = _segments(data)  # stacked columns (loops come placed)
-        for s in segments:
-            for x, y, radius in data["bars"]:
-                _add_tube(meshes["longitudinal"], (x + s["x"], y + s["y"], s["z"]),
-                          (x + s["x"], y + s["y"], s["z"] + s["height"]), radius if solid else thin, sides)
+        if data.get("bar_paths"):
+            # continuous bars cut and lapped, the lower bar cranked
+            for points, radius in data["bar_paths"]:
+                for a, b in zip(points, points[1:]):
+                    _add_tube(meshes["longitudinal"], a, b, radius if solid else thin, sides)
+        else:
+            for s in segments:
+                for x, y, radius in data["bars"]:
+                    _add_tube(meshes["longitudinal"], (x + s["x"], y + s["y"], s["z"]),
+                              (x + s["x"], y + s["y"], s["z"] + s["height"]), radius if solid else thin, sides)
         for kind, pts, closed, zs, radius in data["loops"]:
             r = radius if solid else thin * 0.8
             count = len(pts) if closed else len(pts) - 1
