@@ -828,3 +828,37 @@ def fit_polyline_to_box(points, box):
         return (a + b) / 2.0 if span < 1e-9 else a + (v - lo) / span * (b - a)
 
     return [(along(x, min(xs), w, x0, x1), along(y, min(ys), h, y0, y1)) for x, y in points]
+
+
+def stirrup_zone_positions(length, zones, rest):
+    """Like `stirrup_positions`, but each stirrup tagged with its zone:
+    [(offset, zone_index)], zone_index being the position in `zones`
+    ("1@.05" -> 0, "6@.10" -> 1...) or len(zones) for the rest. The two
+    ends mirror each other; a stirrup added in the middle is 'rest'."""
+    if length <= 0:
+        return []
+    rest_zone = len(zones)
+    half = length / 2.0
+    eps = 1e-6
+    bottom = []
+    z = 0.0
+    for index, (count, spacing) in enumerate(zones):
+        for _ in range(count):
+            if z + spacing > half + eps:
+                break
+            z += spacing
+            bottom.append((z, index))
+    while z + rest <= half + eps:
+        z += rest
+        bottom.append((z, rest_zone))
+    if not bottom:
+        return [(half, rest_zone)]
+    top = [(length - p, zone) for p, zone in reversed(bottom)]
+    gap = top[0][0] - bottom[-1][0]
+    if gap < rest / 2.0:
+        bottom, top, middle = bottom[:-1], top[1:], [(half, rest_zone)]
+    elif gap > rest + eps:
+        middle = [(half, rest_zone)]
+    else:
+        middle = []
+    return bottom + middle + top

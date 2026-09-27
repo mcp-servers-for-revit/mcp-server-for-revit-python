@@ -1,7 +1,7 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Acero - Columnas"
-        Height="780" Width="1340" MinWidth="1040" MinHeight="560"
+        Height="880" Width="1560" MinWidth="1200" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip"
         PreviewKeyDown="window_key">
@@ -65,22 +65,22 @@
                                    ToolTip="Estribos interiores (los que no abrazan todas las barras) y grapas."/>
                         <ComboBox Grid.Row="0" Grid.Column="1" x:Name="cbo_conf" VerticalAlignment="Center" SelectionChanged="stirrup_diameter_changed"/>
                         <TextBlock Grid.Row="1" Text="     Distribuci&#243;n:" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="txt_conf_dist" VerticalAlignment="Center"
+                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="txt_conf_dist" TextChanged="config_changed" VerticalAlignment="Center"
                                  ToolTip="Desde cada extremo, en la luz libre. Ej. 1@5 6@10 Rto@25. Vacio si no hay estribos interiores ni grapas."/>
                         <TextBlock Grid.Row="2" Text="Estribo de borde &#216;:" VerticalAlignment="Center"
                                    ToolTip="Estribo perimetral (el que abraza todas las barras)."/>
                         <ComboBox Grid.Row="2" Grid.Column="1" x:Name="cbo_edge" VerticalAlignment="Center" SelectionChanged="stirrup_diameter_changed"/>
                         <TextBlock Grid.Row="3" Text="     Distribuci&#243;n:" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="txt_edge_dist" VerticalAlignment="Center"
+                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="txt_edge_dist" TextChanged="config_changed" VerticalAlignment="Center"
                                  ToolTip="Desde cada extremo, en la luz libre. Ej. 1@5 6@10 Rto@25  o  1@.05, 10@.10, rto@.20"/>
                         <TextBlock Grid.Row="4" Text="Recubrimiento (cm):" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="txt_cover" VerticalAlignment="Center"/>
-                        <CheckBox Grid.Row="5" x:Name="chk_nucleo" Content="Estribo en n&#250;cleo" VerticalAlignment="Center"
+                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="txt_cover" TextChanged="config_changed" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="5" x:Name="chk_nucleo" Click="config_changed" Content="Estribo en n&#250;cleo" VerticalAlignment="Center"
                                   ToolTip="Estribos tambien dentro del nudo viga-columna (desde el fondo de la viga hasta el tope)."/>
                         <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                                     IsEnabled="{Binding IsChecked, ElementName=chk_nucleo}">
                             <TextBlock Text="@ " VerticalAlignment="Center"/>
-                            <TextBox x:Name="txt_nucleo" Width="50"/>
+                            <TextBox x:Name="txt_nucleo" TextChanged="config_changed" Width="50"/>
                             <TextBlock Text=" cm" VerticalAlignment="Center"/>
                         </StackPanel>
                         <Button Grid.Row="6" Grid.ColumnSpan="2" x:Name="button_save" Margin="0,8,0,0" Height="30"
@@ -169,11 +169,60 @@
                 </Border>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
                            Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barra: clic donde va. Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
-                <Border BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White" ClipToBounds="True">
-                    <Canvas x:Name="canvas" Background="White"
-                            MouseLeftButtonDown="canvas_left" MouseRightButtonDown="canvas_right"
-                            MouseMove="canvas_move" SizeChanged="canvas_resized"/>
-                </Border>
+                <!-- Three views: plan (the sketch), elevation and 3D. Mouse wheel
+                     zooms, middle button drag pans, "Ajustar" refits; in 3D a
+                     left drag orbits. -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.15*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Column="0" Grid.RowSpan="2" Margin="0,0,6,0">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                            <Button DockPanel.Dock="Right" Content="Ajustar" Width="60" Click="plan_fit_click"/>
+                            <TextBlock Text="PLANTA" FontWeight="Bold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <Border BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White" ClipToBounds="True">
+                            <Canvas x:Name="canvas" Background="White"
+                                    MouseLeftButtonDown="canvas_left" MouseRightButtonDown="canvas_right"
+                                    MouseMove="canvas_move" SizeChanged="canvas_resized"
+                                    MouseWheel="plan_wheel" MouseDown="plan_mouse_down" MouseUp="plan_mouse_up"/>
+                        </Border>
+                    </DockPanel>
+
+                    <DockPanel Grid.Column="1" Grid.Row="0" Margin="0,0,0,6">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                            <Button DockPanel.Dock="Right" Content="Ajustar" Width="60" Click="elev_fit_click"/>
+                            <TextBlock Text="ALZADO" FontWeight="Bold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <Border BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White" ClipToBounds="True">
+                            <Canvas x:Name="canvas_elev" Background="White" SizeChanged="elev_resized"
+                                    MouseWheel="elev_wheel" MouseDown="elev_mouse_down" MouseUp="elev_mouse_up"
+                                    MouseMove="elev_mouse_move"/>
+                        </Border>
+                    </DockPanel>
+
+                    <DockPanel Grid.Column="1" Grid.Row="1">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                            <Button DockPanel.Dock="Right" Content="Ajustar" Width="60" Click="view3d_fit_click"/>
+                            <ComboBox DockPanel.Dock="Right" x:Name="cbo_detail" Width="80" Margin="0,0,6,0"
+                                      SelectionChanged="detail_changed"/>
+                            <TextBlock DockPanel.Dock="Right" Text="Nivel de detalle: " VerticalAlignment="Center"/>
+                            <TextBlock Text="VISTA 3D" FontWeight="Bold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <Border x:Name="border3d" BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White"
+                                ClipToBounds="True"
+                                MouseWheel="view3d_wheel" MouseDown="view3d_mouse_down" MouseUp="view3d_mouse_up"
+                                MouseMove="view3d_mouse_move" SizeChanged="view3d_resized">
+                            <Viewport3D x:Name="view3d"/>
+                        </Border>
+                    </DockPanel>
+                </Grid>
             </DockPanel>
 
             <!-- Right: rebar shape browser, always shown -->

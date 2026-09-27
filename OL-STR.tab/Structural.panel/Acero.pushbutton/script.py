@@ -22,6 +22,7 @@ import formwork_geometry as fw_geom
 import formwork_params as fw_params
 import rebar_spec as rs
 import rebar_columns as rc
+import rebar_views as rv
 import utils as fw_utils
 
 # pyRevit keeps one interpreter across clicks: reload so edits on disk
@@ -32,6 +33,7 @@ reload(fw_geom)
 reload(fw_params)
 reload(rs)
 reload(rc)
+reload(rv)
 
 from pyrevit import revit, DB, forms, script
 from Autodesk.Revit.Exceptions import OperationCanceledException
@@ -41,7 +43,7 @@ from System.Windows import (FontWeights, HorizontalAlignment, Point, Size, Thick
                             VerticalAlignment, Visibility)
 from Microsoft.Win32 import OpenFileDialog
 from Autodesk.Revit.DB.Structure import RebarShape, RebarStyle
-from System.Windows.Input import Key, Keyboard
+from System.Windows.Input import Key, Keyboard, MouseButton
 from System.Windows.Controls import (Button, Canvas, CheckBox, ListBoxItem, Orientation, StackPanel,
                                      TextBlock, TextBox)
 from System.Windows.Media import Color, DoubleCollection, PointCollection, SolidColorBrush
@@ -230,6 +232,15 @@ class AceroWindow(forms.WPFWindow):
         self.bar_key = u'5/8"'
         self._updating_steel = False
         self.selected = None  # index of the stirrup whose measures are shown
+        # Plan / elevation / 3D views: zoom-pan state and what they last showed.
+        self.plan_nav = rv.Nav2D()
+        self.elev_nav = rv.Nav2D()
+        self.scene = rv.Scene3D(self.view3d)
+        self.cbo_detail.ItemsSource = List[str](list(rv.DETAIL_LEVELS))
+        self.cbo_detail.SelectedItem = u"Medio"
+        self._views_sig = None
+        self._elev_data = None
+        self._clear_cache = {}
         self.levels = sorted(
             DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements(),
             key=lambda lv: lv.ProjectElevation,
@@ -317,6 +328,9 @@ class AceroWindow(forms.WPFWindow):
         self.undo_stack = []
         self.draft = []
         self.selected = None
+        self.plan_nav.reset()
+        self.elev_nav.reset()
+        self.scene._extent = None  # refit the 3D camera to the new column
         self._update_measures()
         section = t.section
         if section is None:
@@ -579,7 +593,10 @@ class AceroWindow(forms.WPFWindow):
         span_x, span_y = max(xs) - min(xs), max(ys) - min(ys)
         scale = min((width - 2 * MARGIN_PX) / span_x, (height - 2 * MARGIN_PX) / span_y)
         cx, cy = (max(xs) + min(xs)) / 2.0, (max(ys) + min(ys)) / 2.0
-        return section, scale, width / 2.0 - cx * scale, height / 2.0 + cy * scale
+        fitted = (scale, width / 2.0 - cx * scale, height / 2.0 + cy * scale)
+        self._plan_fitted = fitted
+        scale, ox, oy = self.plan_nav.resolve(fitted)
+        return section, scale, ox, oy
 
     def to_px(self, frame, x, y):
         _, scale, ox, oy = frame
@@ -758,6 +775,11 @@ class AceroWindow(forms.WPFWindow):
                 self.cursor_m, self.cursor_on_bar) is None
             self._dot(frame, self.cursor_m[0], self.cursor_m[1], 4 if refused else 3,
                       C_REFUSED if refused else C_CURSOR)
+        signature = (self.state.active, rs.design_to_text(self.design),
+                     tuple(sorted(self._get_form().items())))
+        if signature != self._views_sig:
+            self._views_sig = signature
+            self._refresh_views()
 
     def _hook(self, frame, line, key, color, thickness):
         """The 135-degree hook of a closed stirrup at its first corner (where
@@ -1034,10 +1056,211 @@ class AceroWindow(forms.WPFWindow):
         self.undo_stack.append(rs.design_to_text(self.design))
         self.dirty = True
 
+    # -- zoom / pan of the plan ---------------------------------------------
+    def plan_wheel(self, sender, args):
+        if self._frame() is None:
+            return
+        self.plan_nav.wheel(self._plan_fitted, args.GetPosition(self.canvas), args.Delta)
+        self.redraw()
+        args.Handled = True
+
+    def plan_mouse_down(self, sender, args):
+        if args.ChangedButton == MouseButton.Middle and self._frame() is not None:
+            self.plan_nav.start_pan(self._plan_fitted, args.GetPosition(self.canvas))
+            self.canvas.CaptureMouse()
+
+    def plan_mouse_up(self, sender, args):
+        if args.ChangedButton == MouseButton.Middle:
+            self.plan_nav.end_pan()
+            self.canvas.ReleaseMouseCapture()
+
+    def plan_fit_click(self, sender, args):
+        self.plan_nav.reset()
+        self.redraw()
+
+    # -- elevation and 3D views ----------------------------------------------
+    def config_changed(self, sender, args):
+        if hasattr(self, "_views_sig"):  # also fired while the XAML loads
+            self.redraw()
+
+    def _family_view(self, key_text, dist_text, clear):
+        """{"key", "zones", "rest", "tagged"} of a stirrup family for the
+        views, or None (message) when its settings don't read."""
+        if not (dist_text or u"").strip():
+            return None, None
+        try:
+            key = rs.parse_diameter(key_text)
+            zones, rest = rs.parse_distribution(dist_text)
+        except rs.SpecError as e:
+            return None, u"{}".format(e)
+        return {"key": key, "zones": zones, "rest": rest,
+                "tagged": rs.stirrup_zone_positions(clear, zones, rest)}, None
+
+    def _views_data(self):
+        """(elevation data, 3D data) of the active type as configured and
+        drawn right now (unsaved changes included)."""
+        t = self.by_id.get(self.state.active)
+        section = t.section if t else None
+        if section is None:
+            return None, None
+        height = (section.z_top - section.z_bottom) * rc.FT
+        if t.id not in self._clear_cache:
+            try:
+                top = rc.clear_top(doc, t.columns[0], section)
+            except Exception:
+                top = section.z_top
+            self._clear_cache[t.id] = (top - section.z_bottom) * rc.FT
+        clear = self._clear_cache[t.id]
+        f = self._get_form()
+        edge, edge_msg = self._family_view(f["edge"], f["edge_dist"], clear)
+        conf, conf_msg = self._family_view(f["conf"], f["conf_dist"], clear)
+        joint = []
+        if f["nucleo"] and height - clear > 0.1:
+            try:
+                joint = rs.joint_positions(height - clear, float(f["nucleo"].replace(u",", u".")) / 100.0)
+            except ValueError:
+                pass
+        message = None
+        if edge_msg:
+            message = u"Borde: " + edge_msg
+        elif conf_msg:
+            message = u"Confinamiento: " + conf_msg
+        elif edge is None:
+            message = u"Falta la distribucion del estribo de borde"
+        bars = self.design["bars"]
+        xs = [p[0] for p in section.polygon_m]
+        elev = {
+            "width": max(xs) - min(xs),
+            "height": height,
+            "clear": clear,
+            "bars_x": sorted(set(round(x, 3) for x, _, _ in bars)),
+            "edge": edge,
+            "conf": conf,
+            "joint": joint,
+            "message": message,
+        }
+        loops = []
+        families = {rs.KIND_EDGE: edge, rs.KIND_CONFINEMENT: conf}
+        for kind, poly, wrap, is_open in self.design["stirrups"]:
+            family = families.get(kind)
+            if family is None:
+                continue
+            try:
+                line = rs.stirrup_centerline(poly, bars, family["key"], wrap, is_open)
+            except rs.SpecError:
+                continue
+            zs = [z for z, _ in family["tagged"]] + [clear + j for j in joint]
+            loops.append((kind, line, not is_open, zs, rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
+        for kind, a, b in self.design["ties"]:
+            family = families.get(kind)
+            if family is None:
+                continue
+            try:
+                a2, b2 = rs.tie_centerline(a, b, bars, family["key"])
+            except rs.SpecError:
+                continue
+            zs = [z for z, _ in family["tagged"]] + [clear + j for j in joint]
+            loops.append((kind, [a2, b2], False, zs, rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
+        scene = {
+            "polygon": section.polygon_m,
+            "height": height,
+            "bars": [(x, y, rs.BAR_DIAMETERS_MM[k] / 2000.0) for x, y, k in bars],
+            "loops": loops,
+        }
+        return elev, scene
+
+    def _refresh_views(self):
+        try:
+            elev, scene = self._views_data()
+        except Exception as e:
+            elev, scene = None, None
+            self._status(u"No se pudieron dibujar el alzado y la vista 3D: {}".format(e))
+        self._elev_data = elev
+        self._scene_data = scene
+        self._draw_elevation()
+        self._build_3d()
+
+    def _elev_fitted(self):
+        width, height = self.canvas_elev.ActualWidth, self.canvas_elev.ActualHeight
+        if self._elev_data is None or width < 50 or height < 50:
+            return None
+        return rv.fit_frame(width, height, *rv.elevation_extent(self._elev_data),
+                            margins=(20, 16, 20, 16))
+
+    def _draw_elevation(self):
+        fitted = self._elev_fitted()
+        if fitted is None:
+            self.canvas_elev.Children.Clear()
+            return
+        rv.draw_elevation(self.canvas_elev, self._elev_data, self.elev_nav.resolve(fitted))
+
+    def _build_3d(self):
+        self.scene.build(getattr(self, "_scene_data", None), self.cbo_detail.SelectedItem or u"Medio")
+
+    def elev_resized(self, sender, args):
+        if hasattr(self, "_views_sig"):
+            self._draw_elevation()
+
+    def elev_wheel(self, sender, args):
+        fitted = self._elev_fitted()
+        if fitted is None:
+            return
+        self.elev_nav.wheel(fitted, args.GetPosition(self.canvas_elev), args.Delta)
+        self._draw_elevation()
+        args.Handled = True
+
+    def elev_mouse_down(self, sender, args):
+        fitted = self._elev_fitted()
+        if fitted is not None and args.ChangedButton in (MouseButton.Middle, MouseButton.Left):
+            self.elev_nav.start_pan(fitted, args.GetPosition(self.canvas_elev))
+            self.canvas_elev.CaptureMouse()
+
+    def elev_mouse_move(self, sender, args):
+        if self.elev_nav.pan(args.GetPosition(self.canvas_elev)):
+            self._draw_elevation()
+
+    def elev_mouse_up(self, sender, args):
+        self.elev_nav.end_pan()
+        self.canvas_elev.ReleaseMouseCapture()
+
+    def elev_fit_click(self, sender, args):
+        self.elev_nav.reset()
+        self._draw_elevation()
+
+    def detail_changed(self, sender, args):
+        if hasattr(self, "scene"):
+            self._build_3d()
+
+    def view3d_wheel(self, sender, args):
+        self.scene.wheel(args.Delta)
+        args.Handled = True
+
+    def view3d_mouse_down(self, sender, args):
+        if args.ChangedButton in (MouseButton.Left, MouseButton.Middle):
+            self.scene.start_drag(args.GetPosition(self.border3d), args.ChangedButton == MouseButton.Left)
+            self.border3d.CaptureMouse()
+
+    def view3d_mouse_move(self, sender, args):
+        self.scene.drag(args.GetPosition(self.border3d))
+
+    def view3d_mouse_up(self, sender, args):
+        self.scene.end_drag()
+        self.border3d.ReleaseMouseCapture()
+
+    def view3d_fit_click(self, sender, args):
+        self.scene.fit()
+
+    def view3d_resized(self, sender, args):
+        if hasattr(self, "scene"):
+            self.scene.fit()  # the fit depends on the viewport's shape
+
     def canvas_resized(self, sender, args):
         self.redraw()
 
     def canvas_move(self, sender, args):
+        if self.plan_nav.pan(args.GetPosition(self.canvas)):
+            self.redraw()
+            return
         frame = self._frame()
         if frame is None:
             return

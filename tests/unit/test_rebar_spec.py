@@ -411,3 +411,15 @@ def test_m_t1_corner_is_rebuilt():
     assert closed
     assert sorted(set(round(x, 4) for x, _ in vertices)) == [-3.912, -0.025]
     assert sorted(set(round(y, 4) for _, y in vertices)) == [-3.912, -0.025]
+
+
+def test_zone_positions_match_plain_positions():
+    from revit_mcp.rebar_spec import stirrup_positions, stirrup_zone_positions
+
+    for length in (2.65, 3.25, 0.9, 0.3):
+        zones, rest = [(1, 0.05), (6, 0.10)], 0.20
+        tagged = stirrup_zone_positions(length, zones, rest)
+        assert [p for p, _ in tagged] == pytest.approx(stirrup_positions(length, zones, rest))
+    tagged = stirrup_zone_positions(2.65, [(1, 0.05), (6, 0.10)], 0.20)
+    assert tagged[0][1] == 0 and tagged[1][1] == 1 and tagged[-1][1] == 0
+    assert any(zone == 2 for _, zone in tagged)
