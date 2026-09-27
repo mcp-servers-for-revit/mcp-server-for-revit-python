@@ -770,21 +770,49 @@ def chain_vertices(lines, tol=1e-6):
     return vertices
 
 
-def shape_outline(lines, hook_at_start=False, hook_at_end=False):
-    """(vertices, is_closed) of a rebar shape for the sketch: its hook legs
-    dropped, and closed when its two ends meet (a closed stirrup)."""
-    lines = list(lines)
-    if hook_at_start and len(lines) > 2:
-        lines = lines[1:]
-    if hook_at_end and len(lines) > 2:
-        lines = lines[:-1]
-    vertices = chain_vertices(lines)
+def _close_corner(vertices):
+    """A closed chain's last-to-first corner rebuilt where the first and
+    last segments' lines meet (Revit leaves a gap there for the hook)."""
+    pts = list(vertices[:-1])
+    (a1, b1), (a2, b2) = (vertices[-2], vertices[-1]), (vertices[0], vertices[1])
+    d1 = (b1[0] - a1[0], b1[1] - a1[1])
+    d2 = (b2[0] - a2[0], b2[1] - a2[1])
+    det = d1[0] * d2[1] - d1[1] * d2[0]
+    if abs(det) > 1e-9:
+        t = ((a2[0] - a1[0]) * d2[1] - (a2[1] - a1[1]) * d2[0]) / det
+        pts[0] = (a1[0] + d1[0] * t, a1[1] + d1[1] * t)
+    return pts
+
+
+def _closes(vertices):
+    """Do a chain's two ends meet (a closed stirrup)?"""
+    if len(vertices) < 4:
+        return False
     xs = [x for x, _ in vertices]
     ys = [y for _, y in vertices]
     size = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
     first, last = vertices[0], vertices[-1]
-    if len(vertices) >= 4 and math.hypot(first[0] - last[0], first[1] - last[1]) <= 0.15 * size:
-        return clean_polyline(vertices[:-1], closed=True), True
+    return math.hypot(first[0] - last[0], first[1] - last[1]) <= 0.15 * size
+
+
+def shape_outline(lines, hook_at_start=False, hook_at_end=False):
+    """(vertices, is_closed) of a rebar shape for the sketch. A closed
+    stirrup - its ends meet as drawn, or once the straight legs of its
+    hooks are dropped - comes without hooks (Revit adds its 135-degree
+    ones back); an open shape keeps every segment it shows in Revit."""
+    lines = list(lines)
+    body = list(lines)
+    if hook_at_start and len(body) > 2:
+        body = body[1:]
+    if hook_at_end and len(body) > 2:
+        body = body[:-1]
+    if len(body) < len(lines):
+        without_hooks = chain_vertices(body)
+        if _closes(without_hooks):
+            return clean_polyline(_close_corner(without_hooks), closed=True), True
+    vertices = chain_vertices(lines)
+    if _closes(vertices):
+        return clean_polyline(_close_corner(vertices), closed=True), True
     return clean_polyline(vertices, closed=False), False
 
 

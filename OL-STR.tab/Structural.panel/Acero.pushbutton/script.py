@@ -138,124 +138,67 @@ def collect_types():
     )
 
 
-class ShapeBrowser(forms.WPFWindow):
-    """Revit's rebar shapes, as its own Rebar Shape Browser draws them
-    (GetCurvesForBrowser), to pick one for the sketch. Read every time it
-    opens, so shapes loaded meanwhile show up; it can also load a shape
-    family (.rfa) itself, since Revit is blocked while Acero is open."""
+SHAPE_PREVIEW_W = 200
+SHAPE_PREVIEW_H = 95
 
-    PREVIEW_W = 250
-    PREVIEW_H = 110
 
-    def __init__(self, xaml_file_path):
-        forms.WPFWindow.__init__(self, xaml_file_path)
-        self.chosen = None
-        self.shapes = []
-        self._read_shapes()
-        self._fill()
-
-    def _read_shapes(self):
-        self.shapes = []
-        for shape in DB.FilteredElementCollector(doc).OfClass(RebarShape):
+def read_rebar_shapes():
+    """The project's rebar shapes as Revit's own Rebar Shape Browser draws
+    them (GetCurvesForBrowser: segments, bends and hooks), read fresh so
+    shapes loaded meanwhile show up."""
+    shapes = []
+    for shape in DB.FilteredElementCollector(doc).OfClass(RebarShape):
+        try:
+            curves = list(shape.GetCurvesForBrowser())
+        except Exception:
+            continue
+        strokes, lines = [], []
+        for curve in curves:
+            strokes.append([(q.X, q.Y) for q in curve.Tessellate()])
+            if isinstance(curve, DB.Line):
+                a, b = curve.GetEndPoint(0), curve.GetEndPoint(1)
+                lines.append(((a.X, a.Y), (b.X, b.Y)))
+        if not strokes:
+            continue
+        hooks = []
+        for end_index in (0, 1):
             try:
-                curves = list(shape.GetCurvesForBrowser())
+                hooks.append(bool(shape.GetDefaultHookAngle(end_index)))
             except Exception:
-                continue
-            strokes, lines = [], []
-            for curve in curves:
-                strokes.append([(p.X, p.Y) for p in curve.Tessellate()])
-                if isinstance(curve, DB.Line):
-                    a, b = curve.GetEndPoint(0), curve.GetEndPoint(1)
-                    lines.append(((a.X, a.Y), (b.X, b.Y)))
-            if not strokes:
-                continue
-            hooks = []
-            for end in (0, 1):
-                try:
-                    hooks.append(bool(shape.GetDefaultHookAngle(end)))
-                except Exception:
-                    hooks.append(False)
-            self.shapes.append({
-                "name": rc.element_name(shape),
-                "stirrup": shape.RebarStyle == RebarStyle.StirrupTie,
-                "strokes": strokes,
-                "lines": lines,
-                "hooks": hooks,
-            })
-        self.shapes.sort(key=lambda sh: _natural_key(sh["name"]))
+                hooks.append(False)
+        shapes.append({
+            "name": rc.element_name(shape),
+            "stirrup": shape.RebarStyle == RebarStyle.StirrupTie,
+            "strokes": strokes,
+            "lines": lines,
+            "hooks": hooks,
+        })
+    shapes.sort(key=lambda sh: _natural_key(sh["name"]))
+    return shapes
 
-    def _preview(self, strokes):
-        canvas = Canvas()
-        canvas.Width, canvas.Height = self.PREVIEW_W, self.PREVIEW_H
-        pts = [p for stroke in strokes for p in stroke]
-        xs = [x for x, _ in pts]
-        ys = [y for _, y in pts]
-        span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
-        scale = min((self.PREVIEW_W - 20) / span, (self.PREVIEW_H - 20) / span)
-        ox = self.PREVIEW_W / 2.0 - (max(xs) + min(xs)) / 2.0 * scale
-        oy = self.PREVIEW_H / 2.0 + (max(ys) + min(ys)) / 2.0 * scale
-        for stroke in strokes:
-            line = Polyline()
-            points = PointCollection()
-            for x, y in stroke:
-                points.Add(Point(ox + x * scale, oy - y * scale))
-            line.Points = points
-            line.Stroke = C_OUTLINE
-            line.StrokeThickness = 2
-            canvas.Children.Add(line)
-        return canvas
 
-    def _fill(self):
-        text = (self.txt_filter.Text or u"").strip().lower()
-        only_stirrups = bool(self.chk_stirrups.IsChecked)
-        self.list_shapes.Items.Clear()
-        for shape in self.shapes:
-            if text and text not in shape["name"].lower():
-                continue
-            if only_stirrups and not shape["stirrup"]:
-                continue
-            panel = StackPanel()
-            panel.Children.Add(self._preview(shape["strokes"]))
-            name = TextBlock()
-            name.Text = shape["name"]
-            name.HorizontalAlignment = HorizontalAlignment.Center
-            panel.Children.Add(name)
-            item = ListBoxItem()
-            item.Content = panel
-            item.Tag = shape
-            self.list_shapes.Items.Add(item)
-
-    def filter_changed(self, sender, args):
-        self._fill()
-
-    def load_click(self, sender, args):
-        dialog = OpenFileDialog()
-        dialog.Filter = u"Formas de armadura (*.rfa)|*.rfa"
-        dialog.Multiselect = True
-        if not dialog.ShowDialog(self):
-            return
-        loaded = 0
-        with revit.Transaction("Acero - cargar formas de armadura"):
-            for path in dialog.FileNames:
-                try:
-                    if doc.LoadFamily(path):
-                        loaded += 1
-                except Exception:
-                    pass
-        self._read_shapes()
-        self._fill()
-        forms.alert(u"Formas cargadas: {} de {}.".format(loaded, len(dialog.FileNames)), title="Acero")
-
-    def insert_click(self, sender, args):
-        item = self.list_shapes.SelectedItem
-        if item is None:
-            return
-        self.chosen = item.Tag
-        self.Close()
-
-    def cancel_click(self, sender, args):
-        self.Close()
-
+def shape_preview(strokes):
+    """The shape drawn like in Revit's browser: same proportions, dark
+    strokes, bends and hooks included."""
+    canvas = Canvas()
+    canvas.Width, canvas.Height = SHAPE_PREVIEW_W, SHAPE_PREVIEW_H
+    pts = [q for stroke in strokes for q in stroke]
+    xs = [x for x, _ in pts]
+    ys = [y for _, y in pts]
+    span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
+    scale = min((SHAPE_PREVIEW_W - 24) / span, (SHAPE_PREVIEW_H - 16) / span)
+    ox = SHAPE_PREVIEW_W / 2.0 - (max(xs) + min(xs)) / 2.0 * scale
+    oy = SHAPE_PREVIEW_H / 2.0 + (max(ys) + min(ys)) / 2.0 * scale
+    for stroke in strokes:
+        line = Polyline()
+        points = PointCollection()
+        for x, y in stroke:
+            points.Add(Point(ox + x * scale, oy - y * scale))
+        line.Points = points
+        line.Stroke = C_BAR
+        line.StrokeThickness = 2
+        canvas.Children.Add(line)
+    return canvas
 
 def _natural_key(name):
     """'Forma 2' before 'Forma 10'."""
@@ -298,6 +241,8 @@ class AceroWindow(forms.WPFWindow):
         ).IsChecked = True
 
         self._refresh_steel()
+        self.rebar_shapes = read_rebar_shapes()
+        self._fill_shapes()
         for t in types:
             self.list_types.Items.Add(self._type_item(t))
         self._refresh_picked()
@@ -747,8 +692,10 @@ class AceroWindow(forms.WPFWindow):
                 line = rs.stirrup_centerline(poly, bars, key, wrap, is_open)
             except rs.SpecError:
                 line = poly
-            self._polyline(frame, line, color(kind), max(2, rs.BAR_DIAMETERS_MM[key] / 1000.0 * scale),
-                           closed=not is_open)
+            thickness = max(2, rs.BAR_DIAMETERS_MM[key] / 1000.0 * scale)
+            self._polyline(frame, line, color(kind), thickness, closed=not is_open)
+            if not is_open:
+                self._hook(frame, line, key, color(kind), thickness)
             if i == self.selected:
                 try:
                     outline = rs.stirrup_outline(poly, bars, key, wrap, is_open)
@@ -795,6 +742,26 @@ class AceroWindow(forms.WPFWindow):
                 self.cursor_m, self.cursor_on_bar) is None
             self._dot(frame, self.cursor_m[0], self.cursor_m[1], 4 if refused else 3,
                       C_REFUSED if refused else C_CURSOR)
+
+    def _hook(self, frame, line, key, color, thickness):
+        """The 135-degree hook of a closed stirrup at its first corner (where
+        Revit puts it): a short leg into the core along the bisector."""
+        pts = rs.counterclockwise(line)
+        if len(pts) < 3:
+            return
+        c, nxt, prv = pts[0], pts[1], pts[-1]
+        u = [nxt[0] - c[0], nxt[1] - c[1]]
+        v = [prv[0] - c[0], prv[1] - c[1]]
+        lu, lv = (u[0] ** 2 + u[1] ** 2) ** 0.5, (v[0] ** 2 + v[1] ** 2) ** 0.5
+        if lu < 1e-9 or lv < 1e-9:
+            return
+        bx, by = u[0] / lu + v[0] / lv, u[1] / lu + v[1] / lv
+        lb = (bx ** 2 + by ** 2) ** 0.5
+        if lb < 1e-9:
+            return
+        length = max(6 * rs.BAR_DIAMETERS_MM[key] / 1000.0, 0.075)
+        end = (c[0] + bx / lb * length, c[1] + by / lb * length)
+        self._polyline(frame, [c, end], color, thickness)
 
     @staticmethod
     def _rect(a, b):
@@ -1235,32 +1202,74 @@ class AceroWindow(forms.WPFWindow):
             self._select(None)
         self.redraw()
 
-    def shapes_click(self, sender, args):
-        """Open the rebar shape browser and put the chosen shape in the
-        sketch as a stirrup."""
+    # -- rebar shape browser (right panel) ---------------------------------
+    def _fill_shapes(self):
+        text = (self.txt_shape_filter.Text or u"").strip().lower()
+        only_stirrups = bool(self.chk_shape_stirrups.IsChecked)
+        self.list_shapes.Items.Clear()
+        for shape in self.rebar_shapes:
+            if text and text not in shape["name"].lower():
+                continue
+            if only_stirrups and not shape["stirrup"]:
+                continue
+            panel = StackPanel()
+            panel.Children.Add(shape_preview(shape["strokes"]))
+            name = TextBlock()
+            name.Text = shape["name"]
+            name.HorizontalAlignment = HorizontalAlignment.Center
+            panel.Children.Add(name)
+            item = ListBoxItem()
+            item.Content = panel
+            item.Tag = shape
+            self.list_shapes.Items.Add(item)
+
+    def shape_filter_changed(self, sender, args):
+        if hasattr(self, "rebar_shapes"):  # also fired while the XAML loads
+            self._fill_shapes()
+
+    def shape_load_click(self, sender, args):
+        """Load rebar shape families (.rfa) without leaving Acero (Revit is
+        blocked while this window is open)."""
+        dialog = OpenFileDialog()
+        dialog.Filter = u"Formas de armadura (*.rfa)|*.rfa"
+        dialog.Multiselect = True
+        if not dialog.ShowDialog(self):
+            return
+        loaded = 0
+        with revit.Transaction("Acero - cargar formas de armadura"):
+            for path in dialog.FileNames:
+                try:
+                    if doc.LoadFamily(path):
+                        loaded += 1
+                except Exception:
+                    pass
+        self.rebar_shapes = read_rebar_shapes()
+        self._fill_shapes()
+        self._status(u"Formas cargadas: {} de {}.".format(loaded, len(dialog.FileNames)))
+
+    def shape_insert_click(self, sender, args):
+        """Put the chosen shape in the sketch as a stirrup, filling the space
+        inside the cover."""
+        item = self.list_shapes.SelectedItem
+        if item is None:
+            return
+        shape = item.Tag
         t = self.by_id.get(self.state.active)
         section = t.section if t else None
         cover = self._cover_m()
         if section is None or cover is None:
-            forms.alert(u"Elige un tipo con seccion valida y un recubrimiento.", title="Acero")
-            return
-        browser = ShapeBrowser(os.path.join(SCRIPT_DIR, "FormasForm.xaml"))
-        browser.Owner = self
-        browser.ShowDialog()
-        shape = browser.chosen
-        if shape is None:
+            self._status(u"Elige un tipo con seccion valida y un recubrimiento.")
             return
         try:
             vertices, closed = rs.shape_outline(shape["lines"], shape["hooks"][0], shape["hooks"][1])
         except rs.SpecError as e:
-            forms.alert(u"No se puede usar la forma {}: {}".format(shape["name"], e), title="Acero")
+            self._status(u"No se puede usar la forma {}: {}".format(shape["name"], e))
             return
         if len(vertices) < 2:
-            forms.alert(u"La forma {} no tiene tramos para un estribo.".format(shape["name"]), title="Acero")
+            self._status(u"La forma {} no tiene tramos para un estribo.".format(shape["name"]))
             return
         kind = self.kind_for["stirrup"]
         key = self._family_key(kind)
-        # Its outer face fills the space inside the cover.
         box = rs.cover_bounds(section.polygon_m, cover + rs.BAR_DIAMETERS_MM[key] / 1000.0)
         pts = rs.clean_polyline(rs.fit_polyline_to_box(vertices, box), closed=closed)
         if self._outside_cover(kind, pts, 0.0, not closed):

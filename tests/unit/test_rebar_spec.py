@@ -380,3 +380,34 @@ class TestShapes:
         assert pts == [(-0.1, -0.3), (0.1, -0.3), (0.1, 0.3)]
         straight = fit_polyline_to_box([(0, 0), (0, 5)], (-0.1, -0.3, 0.1, 0.3))
         assert straight[0][0] == 0.0 and straight[1][1] == 0.3
+
+
+def test_open_shape_keeps_its_legs():
+    from revit_mcp.rebar_spec import shape_outline
+
+    # a U with short legs up, even if Revit reports hooks at its ends
+    lines = [((0.0, 0.3), (0.0, 0.0)), ((0.0, 0.0), (1.0, 0.0)), ((1.0, 0.0), (1.0, 0.3))]
+    vertices, closed = shape_outline(lines, True, True)
+    assert not closed and len(vertices) == 4
+
+
+def test_closed_stirrup_whose_hooks_are_not_straight_segments():
+    from revit_mcp.rebar_spec import shape_outline
+
+    # M_T1 in Revit's browser: just its 4 sides (hooks drawn as arcs)
+    lines = [((0.0, 1.0), (0.0, 0.0)), ((0.0, 0.0), (1.0, 0.0)),
+             ((1.0, 0.0), (1.0, 1.0)), ((1.0, 1.0), (0.0, 1.0))]
+    vertices, closed = shape_outline(lines, True, True)
+    assert closed and len(vertices) == 4
+
+
+def test_m_t1_corner_is_rebuilt():
+    from revit_mcp.rebar_spec import shape_outline
+
+    # M_T1 exactly as Revit's browser returns it (gap at the hook corner)
+    lines = [((0.0, -0.025), (-3.912, -0.025)), ((-3.912, -0.025), (-3.912, -3.912)),
+             ((-3.912, -3.912), (-0.025, -3.912)), ((-0.025, -3.912), (-0.025, 0.0))]
+    vertices, closed = shape_outline(lines, True, True)
+    assert closed
+    assert sorted(set(round(x, 4) for x, _ in vertices)) == [-3.912, -0.025]
+    assert sorted(set(round(y, 4) for _, y in vertices)) == [-3.912, -0.025]

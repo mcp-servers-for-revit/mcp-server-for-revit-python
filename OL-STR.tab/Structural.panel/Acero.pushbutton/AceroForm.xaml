@@ -1,7 +1,7 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Acero - Columnas"
-        Height="760" Width="1080" MinWidth="820" MinHeight="560"
+        Height="780" Width="1340" MinWidth="1040" MinHeight="560"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip"
         PreviewKeyDown="window_key">
@@ -32,6 +32,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="370"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="250"/>
             </Grid.ColumnDefinitions>
 
             <!-- Left: types + configuration -->
@@ -126,8 +127,6 @@
                               ToolTip="Estribo y Grapa: el di&#225;metro de la configuraci&#243;n de estribos (borde o confinamiento). Barra: el di&#225;metro de la barra longitudinal."/>
                     <Button Content="Deshacer" Width="70" Margin="0,0,4,0" Click="undo_click"/>
                     <Button Content="Limpiar" Width="65" Margin="0,0,4,0" Click="clear_click"/>
-                    <Button Content="Formas de armadura..." Width="140" Click="shapes_click"
-                            ToolTip="Navegador de formas de armadura del proyecto: elige una y se inserta en el boceto como estribo."/>
                 </WrapPanel>
                 <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                     <TextBlock Text="Estribo: " VerticalAlignment="Center"/>
@@ -173,6 +172,27 @@
                             MouseMove="canvas_move" SizeChanged="canvas_resized"/>
                 </Border>
             </DockPanel>
+
+            <!-- Right: rebar shape browser, always shown -->
+            <GroupBox Grid.Column="2" Header="Formas de armadura" Margin="10,0,0,0" Padding="4">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <TextBlock Text="Buscar: " VerticalAlignment="Center"/>
+                        <TextBox x:Name="txt_shape_filter" TextChanged="shape_filter_changed"/>
+                    </DockPanel>
+                    <CheckBox DockPanel.Dock="Top" x:Name="chk_shape_stirrups" Content="Solo formas de estribo"
+                              IsChecked="False" Margin="0,0,0,4" Click="shape_filter_changed"/>
+                    <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                        <Button Content="Insertar en el boceto" Height="28" FontWeight="Bold" Margin="0,0,0,4"
+                                Click="shape_insert_click"/>
+                        <Button Content="Cargar forma (.rfa)..." Height="26" Click="shape_load_click"/>
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
+                               Text="Doble clic en una forma para insertarla en el boceto, ajustada al recubrimiento."/>
+                    <ListBox x:Name="list_shapes" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             MouseDoubleClick="shape_insert_click"/>
+                </DockPanel>
+            </GroupBox>
         </Grid>
     </DockPanel>
 </Window>
