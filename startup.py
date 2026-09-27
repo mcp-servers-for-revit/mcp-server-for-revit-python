@@ -70,3 +70,11 @@ def register_routes():
 
 # Register all routes when the extension loads
 register_routes()
+
+# Keep a failed request (e.g. a dropped client) from crashing Revit.
+try:
+    from revit_mcp.server_guard import install as install_server_guard
+
+    install_server_guard(__revit__)  # noqa: F821 - provided by pyRevit
+except Exception as e:
+    logger.error("Failed to install Routes server guard: %s", str(e))
