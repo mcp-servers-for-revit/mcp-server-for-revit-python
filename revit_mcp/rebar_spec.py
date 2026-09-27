@@ -80,6 +80,22 @@ def bar_weight_kg_per_m(diameter_key):
     return STEEL_DENSITY_KG_M3 * math.pi * d * d / 4.0
 
 
+def stack_lifts(items):
+    """How far (m) each stirrup/tie is raised over its set height so the
+    ones set at the same height lie stacked, touching, like on site, not
+    through each other. `items`: [(kind, diameter_m, is_tie)] in drawing
+    order. Edge ("borde") stirrups go first, then confinement; within a
+    kind, stirrups before ties. The first one stays where it is set."""
+    order = sorted(range(len(items)), key=lambda i: (
+        0 if items[i][0] == KIND_EDGE else 1, 1 if items[i][2] else 0, i))
+    lifts = [0.0] * len(items)
+    height = 0.0
+    for i in order:
+        lifts[i] = height
+        height += items[i][1]
+    return lifts
+
+
 def diameter_from_name(name):
     """The bar diameter written in a bar type name ('..._Ø5/8"_ZAPATA',
     'Ø12mm_COLUMNA C-8'), or None."""

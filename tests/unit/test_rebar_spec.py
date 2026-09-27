@@ -115,6 +115,18 @@ def test_diameter_from_bar_type_name(name, key):
     assert diameter_from_name(name) == key
 
 
+def test_stack_lifts_puts_stirrups_side_by_side():
+    from revit_mcp.rebar_spec import stack_lifts
+
+    d = 0.009525
+    # drawn: a confinement tie, two edge stirrups, a confinement stirrup
+    items = [("confinamiento", d, True), ("borde", d, False), ("borde", d, False),
+             ("confinamiento", 0.008, False)]
+    assert stack_lifts(items) == pytest.approx([2 * d + 0.008, 0.0, d, 2 * d])
+    assert stack_lifts([("borde", d, False)]) == [0.0]
+    assert stack_lifts([]) == []
+
+
 def test_nearest_diameter():
     from revit_mcp.rebar_spec import nearest_diameter
 

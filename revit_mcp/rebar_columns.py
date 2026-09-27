@@ -562,11 +562,20 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark, shapes=Non
         a2, b2 = spec.tie_centerline(a, b, design["bars"], family.key)
         entry[2].append((a2, b2, shape_name))
 
+    # Stirrups and ties set at the same height lie stacked, one bar
+    # diameter apart, like on site: side by side, never through each other.
+    flat = [(kind, i, is_tie) for kind, (family, loops, ties) in groups.items()
+            for is_tie, items in ((False, loops), (True, ties)) for i in range(len(items))]
+    lifts = spec.stack_lifts([
+        (kind, spec.BAR_DIAMETERS_MM[groups[kind][0].key] / 1000.0, is_tie) for kind, i, is_tie in flat])
+    lift_ft = dict(((kind, i, is_tie), lift / FT) for (kind, i, is_tie), lift in zip(flat, lifts))
+
     for kind, (family, loops, ties) in groups.items():
         stirrup_type = bar_type_for(family.key)
         hook = hooks.get(family.key)
-        for z, n, spacing in _runs(family, column_spec.joint_spacing_m, section, z_clear_top):
-            for line, is_open, shape_name in loops:
+        for z_set, n, spacing in _runs(family, column_spec.joint_spacing_m, section, z_clear_top):
+            for index, (line, is_open, shape_name) in enumerate(loops):
+                z = z_set + lift_ft[(kind, index, False)]
                 if is_open:
                     # U-shaped stirrup: its drawn segments, ends left
                     # straight (no hooks) unless its shape has them.
@@ -592,7 +601,8 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark, shapes=Non
                 _set(rebar, n, spacing)
                 _tag(rebar, column)
                 created.append((rebar, family.key, kind))
-            for a, b, shape_name in ties:
+            for index, (a, b, shape_name) in enumerate(ties):
+                z = z_set + lift_ft[(kind, index, True)]
                 line = DB.Line.CreateBound(
                     section.point_m(a[0], a[1], z), section.point_m(b[0], b[1], z)
                 )

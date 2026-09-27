@@ -1286,10 +1286,12 @@ class AceroWindow(forms.WPFWindow):
             families = {rs.KIND_EDGE: edge, rs.KIND_CONFINEMENT: conf}
             drawn = [(kind, poly, wrap, is_open) for kind, poly, wrap, is_open in self.design["stirrups"]]
             drawn += [(kind, [a, b], None, None) for kind, a, b in self.design["ties"]]
-            for kind, poly, wrap, is_open in drawn:
-                family = families.get(kind)
-                if family is None:
-                    continue
+            drawn = [item for item in drawn if families.get(item[0]) is not None]
+            # stacked like they are generated (see rc.generate_column)
+            lifts = rs.stack_lifts([(kind, rs.BAR_DIAMETERS_MM[families[kind]["key"]] / 1000.0, is_open is None)
+                                    for kind, _, _, is_open in drawn])
+            for (kind, poly, wrap, is_open), lift in zip(drawn, lifts):
+                family = families[kind]
                 try:
                     if is_open is None:  # a tie
                         line, closed = list(rs.tie_centerline(poly[0], poly[1], bars, family["key"])), False
@@ -1298,7 +1300,7 @@ class AceroWindow(forms.WPFWindow):
                         closed = not is_open
                 except rs.SpecError:
                     continue
-                zs = [dz + z for z, _ in family["tagged"]] + [dz + clear + j for j in joint]
+                zs = [dz + lift + z for z, _ in family["tagged"]] + [dz + lift + clear + j for j in joint]
                 loops.append((kind, [(x + dx, y + dy) for x, y in line], closed, zs,
                               rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
         top = max(s["z"] + s["height"] for s in segments)
