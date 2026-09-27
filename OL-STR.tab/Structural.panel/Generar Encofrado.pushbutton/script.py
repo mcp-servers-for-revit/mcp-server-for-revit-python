@@ -222,8 +222,7 @@ output.print_md("| **Total** | | **{:.2f}** |".format(grand_total))
 soil_total = sum(e.get("excluded_soil_area_m2", 0.0) for e in report["elements"])
 if config["pour_against_soil"]:
     output.print_md(
-        "
-**Vaciado contra terreno (sin encofrado):** {:.2f} m2".format(soil_total)
+        "\n**Vaciado contra terreno (sin encofrado):** {:.2f} m2".format(soil_total)
     )
 if report.get("excluded_masonry_walls"):
     output.print_md(
