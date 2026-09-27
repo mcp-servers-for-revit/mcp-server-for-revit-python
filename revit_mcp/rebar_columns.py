@@ -70,6 +70,10 @@ OBSOLETE_TYPE_PARAMS = {
 EDGE, CONFINEMENT, LONGITUDINAL = "borde", "confinamiento", "longitudinal"
 WEIGHT_PARAM = "EA_Peso_Acero_kg"
 ORIGIN_PARAM = "EA_Origen_Id"
+# Type parameters of the bar types (Structural Rebar), filled from the
+# weight table (data/acero_pesos_por_diametro.csv).
+BAR_DIAMETER_PARAM = u"DIAMETRO DE BARRA"
+BAR_WEIGHT_PARAM = u"PESO NOMINAL (kg/m)"
 DEFAULT_COVER_CM = 4.0  # E.060 columns
 CONFINEMENT_COVER_CM = 2.5  # columnetas (confinement columns)
 # Framing whose underside is at most this far below a column top frames
@@ -96,13 +100,49 @@ def ensure_parameters(doc):
     specs = [(name, True, columns, False) for name in TYPE_PARAMS]
     specs.append((WEIGHT_PARAM, False, columns, True))
     specs.append((ORIGIN_PARAM, True, [DB.BuiltInCategory.OST_Rebar], True))
+    specs.append((BAR_DIAMETER_PARAM, True, [DB.BuiltInCategory.OST_Rebar], False))
+    specs.append((BAR_WEIGHT_PARAM, False, [DB.BuiltInCategory.OST_Rebar], False))
     warnings = fw_params.ensure_parameters(doc, GROUP_NAME, specs)
     try:
         _migrate_obsolete(doc)
         fw_params.unbind_parameters(doc, list(OBSOLETE_TYPE_PARAMS))
     except Exception as e:
         warnings.append(u"No se pudieron migrar los parametros anteriores: {}".format(e))
+    try:
+        fill_bar_type_parameters(doc)
+    except Exception as e:
+        warnings.append(u"No se pudieron llenar el diametro y el peso de los tipos de barra: {}".format(e))
     return warnings
+
+
+def bar_type_diameter(bar_type):
+    """Diameter key of a bar type: the one in its name (Ø5/8"), else the
+    one of its nominal diameter; None if neither is a known bar."""
+    key = spec.diameter_from_name(element_name(bar_type))
+    if key is None:
+        d = getattr(bar_type, "BarNominalDiameter", None) or bar_type.BarDiameter
+        key = spec.nearest_diameter(d * FT * 1000.0)
+    return key
+
+
+def fill_bar_type_parameters(doc):
+    """Write DIAMETRO DE BARRA and PESO NOMINAL (kg/m) on every bar type
+    from the weight table. Inside an active Transaction. Returns the names
+    of the bar types left blank (a diameter the table doesn't know)."""
+    unknown = []
+    for bar_type in DB.FilteredElementCollector(doc).OfClass(RebarBarType):
+        key = bar_type_diameter(bar_type)
+        p_d = bar_type.LookupParameter(BAR_DIAMETER_PARAM)
+        p_w = bar_type.LookupParameter(BAR_WEIGHT_PARAM)
+        if key is None:
+            unknown.append(element_name(bar_type))
+            continue
+        if p_d is not None and not p_d.IsReadOnly and p_d.AsString() != key:
+            p_d.Set(key)
+        weight = round(spec.bar_weight_kg_per_m(key), 3)
+        if p_w is not None and not p_w.IsReadOnly and abs(p_w.AsDouble() - weight) > 1e-6:
+            p_w.Set(weight)
+    return unknown
 
 
 def _migrate_obsolete(doc):

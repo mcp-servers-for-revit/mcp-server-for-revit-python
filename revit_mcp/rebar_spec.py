@@ -6,11 +6,14 @@ bar weights. No Revit imports, so it can be unit-tested outside Revit.
 
 Lengths are in meters unless a name says otherwise.
 """
+import io
 import json
 import math
+import os
 import re
 
 # Nominal diameters (mm) of the bars used in Peru (ASTM A615 / NTP 341.031).
+# 1 3/8" is the #11 bar (35.8 mm, 1006 mm2), as sold under that name.
 BAR_DIAMETERS_MM = {
     u'1/4"': 6.35,
     u"6mm": 6.0,
@@ -21,10 +24,15 @@ BAR_DIAMETERS_MM = {
     u'5/8"': 15.875,
     u'3/4"': 19.05,
     u'1"': 25.4,
-    u'1 3/8"': 34.925,
+    u'1 3/8"': 35.8,
 }
 
 STEEL_DENSITY_KG_M3 = 7850.0
+
+# Weight per diameter table (data/acero_pesos_por_diametro.csv), editable.
+WEIGHT_TABLE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data", "acero_pesos_por_diametro.csv")
+_weight_table = None
 
 
 class SpecError(ValueError):
@@ -32,9 +40,65 @@ class SpecError(ValueError):
     shown to the user)."""
 
 
+def read_weight_table(path=WEIGHT_TABLE_FILE):
+    """{diameter key: {"area_mm2", "nominal", "minimum"}} (kg/m) from the
+    weight table: 'DIAMETRO;AREA_NOMINAL_MM2;PESO_NOMINAL_KG_M;PESO_MINIMO_KG_M'
+    lines, '#' comments and the header skipped."""
+    table = {}
+    with io.open(path, encoding="utf-8") as f:
+        for number, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith(u"#") or line.upper().startswith(u"DIAMETRO"):
+                continue
+            cells = [c.strip() for c in line.split(u";")]
+            try:
+                table[parse_diameter(cells[0])] = {
+                    "area_mm2": float(cells[1]),
+                    "nominal": float(cells[2]),
+                    "minimum": float(cells[3]),
+                }
+            except (IndexError, ValueError):
+                raise SpecError(u"Tabla de pesos, linea {}: no se entiende '{}'".format(number, line))
+    return table
+
+
+def weight_table():
+    """The weight table, read once."""
+    global _weight_table
+    if _weight_table is None:
+        _weight_table = read_weight_table()
+    return _weight_table
+
+
 def bar_weight_kg_per_m(diameter_key):
+    """Nominal weight of the table; for a diameter not in it, the steel
+    density times the bar's area."""
+    row = weight_table().get(diameter_key)
+    if row:
+        return row["nominal"]
     d = BAR_DIAMETERS_MM[diameter_key] / 1000.0
     return STEEL_DENSITY_KG_M3 * math.pi * d * d / 4.0
+
+
+def diameter_from_name(name):
+    """The bar diameter written in a bar type name ('..._Ø5/8"_ZAPATA',
+    'Ø12mm_COLUMNA C-8'), or None."""
+    m = re.search(u'[Øø∅]\\s*(\\d+(?:\\s+\\d+/\\d+|/\\d+)?\\s*(?:"|”|mm))', name or u"", re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return parse_diameter(m.group(1))
+    except SpecError:
+        return None
+
+
+def nearest_diameter(diameter_mm, tolerance_mm=0.5):
+    """The diameter key whose nominal diameter is within tolerance, or None."""
+    key, best = None, tolerance_mm
+    for k, d in BAR_DIAMETERS_MM.items():
+        if abs(d - diameter_mm) <= best:
+            key, best = k, abs(d - diameter_mm)
+    return key
 
 
 def _clean(text):

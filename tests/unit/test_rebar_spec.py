@@ -81,6 +81,49 @@ def test_weight_matches_peruvian_tables():
     assert bar_weight_kg_per_m('1"') == pytest.approx(3.97, abs=0.01)
 
 
+def test_weight_table_matches_the_supplier_table():
+    from revit_mcp.rebar_spec import read_weight_table
+
+    table = read_weight_table()
+    expected = {  # key: (area mm2, nominal kg/m, minimum kg/m)
+        "6mm": (28, 0.222, 0.207), "8mm": (50, 0.395, 0.371), '3/8"': (71, 0.56, 0.526),
+        "12mm": (113, 0.888, 0.835), '1/2"': (129, 0.994, 0.934), '5/8"': (199, 1.552, 1.459),
+        '3/4"': (284, 2.235, 2.101), '1"': (510, 3.973, 3.735), '1 3/8"': (1006, 7.907, 7.433),
+    }
+    assert set(table) == set(expected)
+    for key, (area, nominal, minimum) in expected.items():
+        assert (table[key]["area_mm2"], table[key]["nominal"], table[key]["minimum"]) == (area, nominal, minimum)
+        assert bar_weight_kg_per_m(key) == nominal
+    # not in the table: steel density times the area
+    assert bar_weight_kg_per_m('1/4"') == pytest.approx(0.249, abs=0.001)
+
+
+@pytest.mark.parametrize(
+    "name, key",
+    [
+        (u'SRB_ACERO DE REFUERZO FY=4200 KG/CM2_Ø5/8"_ZAPATA_Z-1', '5/8"'),
+        (u"Ø12mm_COLUMNA C-8", "12mm"),
+        (u'SRB_..._Ø1/4"_LOSA ALIGERADA_B5', '1/4"'),
+        (u'Ø1 3/8"_COLUMNA', '1 3/8"'),
+        (u"13M", None),
+        (u"Armadura estructural 1", None),
+    ],
+)
+def test_diameter_from_bar_type_name(name, key):
+    from revit_mcp.rebar_spec import diameter_from_name
+
+    assert diameter_from_name(name) == key
+
+
+def test_nearest_diameter():
+    from revit_mcp.rebar_spec import nearest_diameter
+
+    assert nearest_diameter(9.5) == '3/8"'
+    assert nearest_diameter(6.4) == '1/4"'
+    assert nearest_diameter(35.8) == '1 3/8"'
+    assert nearest_diameter(22.2) is None
+
+
 class TestSpaceSeparatedDistribution:
     def test_like_the_reference_tool(self):
         zones, rest = parse_distribution("1@5 6@10 Rto@25")
