@@ -41,7 +41,7 @@ from System.Windows import (FontWeights, HorizontalAlignment, Point, Size, Thick
                             VerticalAlignment, Visibility)
 from Microsoft.Win32 import OpenFileDialog
 from Autodesk.Revit.DB.Structure import RebarShape, RebarStyle
-from System.Windows.Input import Key
+from System.Windows.Input import Key, Keyboard
 from System.Windows.Controls import (Button, Canvas, CheckBox, ListBoxItem, Orientation, StackPanel,
                                      TextBlock, TextBox)
 from System.Windows.Media import Color, DoubleCollection, PointCollection, SolidColorBrush
@@ -466,12 +466,28 @@ class AceroWindow(forms.WPFWindow):
         )
 
     def window_key(self, sender, args):
-        """Esc cancels the stroke being drawn instead of closing the window."""
+        """Esc cancels the stroke being drawn instead of closing the window;
+        Supr deletes the selected stirrup (unless a box is being typed in)."""
         if args.Key == Key.Escape and getattr(self, "draft", None):
             self.draft = []
             self._status()
             self.redraw()
             args.Handled = True
+        elif (args.Key == Key.Delete and getattr(self, "selected", None) is not None
+              and not isinstance(Keyboard.FocusedElement, TextBox)):
+            self.delete_stirrup_click(sender, args)
+            args.Handled = True
+
+    def delete_stirrup_click(self, sender, args):
+        """Delete the selected stirrup, to draw it again."""
+        if self.selected is None or self.selected >= len(self.design["stirrups"]):
+            return
+        self._push_undo()
+        del self.design["stirrups"][self.selected]
+        self.draft = []
+        self._select(None)
+        self._status(u"Estribo eliminado (Deshacer lo recupera).")
+        self.redraw()
 
     # -- sketch tool and its steel ----------------------------------------
     def _tool(self):
@@ -1123,10 +1139,13 @@ class AceroWindow(forms.WPFWindow):
         return True
 
     def _stirrup_at(self, frame, p):
-        """Index of the stirrup whose outline passes nearest the click, or None."""
+        """Index of the stirrup under the click, or None: the one whose
+        outline passes nearest (within SNAP_PX), else the smallest closed
+        stirrup the click falls inside."""
         m = self.to_m(frame, p)
         tol = SNAP_PX / frame[1]
-        best = None
+        near = None
+        inside = None
         for i, (kind, poly, wrap, is_open) in enumerate(self.design["stirrups"]):
             try:
                 outline = rs.stirrup_outline(poly, self.design["bars"], self._family_key(kind), wrap, is_open)
@@ -1134,9 +1153,15 @@ class AceroWindow(forms.WPFWindow):
                 outline = poly
             dist = rs.distance_to_polyline if is_open else rs.distance_to_polygon
             d = min(dist(m, outline), dist(m, poly))
-            if d <= tol and (best is None or d < best[0]):
-                best = (d, i)
-        return best[1] if best else None
+            if d <= tol and (near is None or d < near[0]):
+                near = (d, i)
+            if not is_open and rs.point_in_polygon(m, outline):
+                area = abs(rs.polygon_signed_area(outline))
+                if inside is None or area < inside[0]:
+                    inside = (area, i)
+        if near:
+            return near[1]
+        return inside[1] if inside else None
 
     def _place_tie(self, click_m):
         """One click = one crosstie between the facing bars nearest to it."""
@@ -1166,6 +1191,11 @@ class AceroWindow(forms.WPFWindow):
             dist = rs.distance_to_polyline if is_open else rs.distance_to_polygon
             candidates.append((dist(m, poly), "stirrups", i))
         candidates = [c for c in candidates if c[0] <= tol]
+        if not candidates:
+            # Not on any bar, tie or edge: the stirrup the click is inside.
+            index = self._stirrup_at(frame, p)
+            if index is not None:
+                candidates = [(0.0, "stirrups", index)]
         if candidates:
             _, kind, i = min(candidates)
             self._push_undo()

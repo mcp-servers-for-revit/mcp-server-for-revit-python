@@ -162,6 +162,9 @@
                         <StackPanel x:Name="panel_segments" Orientation="Horizontal"
                                     ToolTip="Cambia un tramo y pulsa Aplicar (o Enter): crece en su misma direccion y lo que sigue se desplaza, sin cambiar los angulos."/>
                         <TextBlock x:Name="txt_m_sides" VerticalAlignment="Center" Foreground="#FF404040"/>
+                        <Button Content="Eliminar estribo" Width="110" Margin="12,0,0,0" Foreground="#FFC0392B"
+                                Click="delete_stirrup_click"
+                                ToolTip="Borra el estribo seleccionado (tecla Supr). Deshacer lo recupera."/>
                     </WrapPanel>
                 </Border>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
