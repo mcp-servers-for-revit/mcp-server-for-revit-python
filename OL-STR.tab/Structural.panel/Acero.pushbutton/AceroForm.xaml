@@ -125,7 +125,9 @@
                     <ComboBox x:Name="cbo_steel" Width="190" Margin="0,0,12,0" SelectionChanged="steel_changed"
                               ToolTip="Estribo y Grapa: el di&#225;metro de la configuraci&#243;n de estribos (borde o confinamiento). Barra: el di&#225;metro de la barra longitudinal."/>
                     <Button Content="Deshacer" Width="70" Margin="0,0,4,0" Click="undo_click"/>
-                    <Button Content="Limpiar" Width="65" Click="clear_click"/>
+                    <Button Content="Limpiar" Width="65" Margin="0,0,4,0" Click="clear_click"/>
+                    <Button Content="Formas de armadura..." Width="140" Click="shapes_click"
+                            ToolTip="Navegador de formas de armadura del proyecto: elige una y se inserta en el boceto como estribo."/>
                 </WrapPanel>
                 <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                     <TextBlock Text="Estribo: " VerticalAlignment="Center"/>

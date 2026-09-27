@@ -353,3 +353,30 @@ def test_legs_grow_from_their_free_end():
     assert first[0] == pytest.approx((0.08, 0.30)) and first[1:] == pts[1:]
     last = resize_segment(pts, len(pts) - 2, 0.05)
     assert last[:-1] == pts[:-1] and last[-1] == pytest.approx((0.08, -0.30))
+
+
+class TestShapes:
+    def test_closed_stirrup_with_hooks(self):
+        from revit_mcp.rebar_spec import shape_outline
+
+        # hook, 4 sides (last overlapping the start corner), hook
+        lines = [((0.3, 0.9), (0.1, 1.0)), ((0.0, 1.0), (0.0, 0.0)), ((0.0, 0.0), (1.0, 0.0)),
+                 ((1.0, 0.0), (1.0, 1.0)), ((1.0, 1.0), (0.05, 1.0)), ((0.05, 1.0), (0.2, 0.85))]
+        vertices, closed = shape_outline(lines, True, True)
+        assert closed and len(vertices) == 4
+
+    def test_open_bracket(self):
+        from revit_mcp.rebar_spec import shape_outline
+
+        lines = [((1.0, 1.0), (0.2, 1.0)), ((0.0, 0.8), (0.0, 0.2)), ((0.2, 0.0), (1.0, 0.0))]
+        vertices, closed = shape_outline(lines)
+        assert not closed
+        assert vertices == [(1.0, 1.0), (0.0, 1.0), (0.0, 0.0), (1.0, 0.0)]
+
+    def test_fit_to_box(self):
+        from revit_mcp.rebar_spec import fit_polyline_to_box
+
+        pts = fit_polyline_to_box([(0, 0), (2, 0), (2, 1)], (-0.1, -0.3, 0.1, 0.3))
+        assert pts == [(-0.1, -0.3), (0.1, -0.3), (0.1, 0.3)]
+        straight = fit_polyline_to_box([(0, 0), (0, 5)], (-0.1, -0.3, 0.1, 0.3))
+        assert straight[0][0] == 0.0 and straight[1][1] == 0.3

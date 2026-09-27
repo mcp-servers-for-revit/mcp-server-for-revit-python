@@ -732,3 +732,71 @@ def resize_segment(points, index, delta):
     if index == 0 and len(pts) > 2:
         return [(x1 - ux * delta, y1 - uy * delta)] + pts[1:]
     return pts[:index + 1] + [(x + ux * delta, y + uy * delta) for x, y in pts[index + 1:]]
+
+
+# --- Rebar shapes from Revit's shape browser -----------------------------------
+# A shape arrives as the straight segments of its browser drawing (bends
+# are arcs and are left out), in drawing order: [((x0, y0), (x1, y1)), ...].
+
+def chain_vertices(lines, tol=1e-6):
+    """Corner points of a chain of straight segments: where each segment's
+    line meets the next one's (the bend arcs between them removed)."""
+    if not lines:
+        raise SpecError(u"La forma no tiene tramos rectos")
+    segs = [list(lines[0])]
+    for a, b in lines[1:]:
+        last = segs[-1][1]
+        # orient each segment to continue from the previous one
+        if math.hypot(b[0] - last[0], b[1] - last[1]) < math.hypot(a[0] - last[0], a[1] - last[1]):
+            a, b = b, a
+        segs.append([a, b])
+    if len(segs) > 1:
+        # the first segment may need flipping to lead into the second
+        a, b = segs[0]
+        nxt = segs[1][0]
+        if math.hypot(a[0] - nxt[0], a[1] - nxt[1]) < math.hypot(b[0] - nxt[0], b[1] - nxt[1]):
+            segs[0] = [b, a]
+    vertices = [segs[0][0]]
+    for (a1, b1), (a2, b2) in zip(segs, segs[1:]):
+        d1 = (b1[0] - a1[0], b1[1] - a1[1])
+        d2 = (b2[0] - a2[0], b2[1] - a2[1])
+        det = d1[0] * d2[1] - d1[1] * d2[0]
+        if abs(det) < tol:
+            vertices.append(b1)  # parallel: no corner to rebuild
+            continue
+        t = ((a2[0] - a1[0]) * d2[1] - (a2[1] - a1[1]) * d2[0]) / det
+        vertices.append((a1[0] + d1[0] * t, a1[1] + d1[1] * t))
+    vertices.append(segs[-1][1])
+    return vertices
+
+
+def shape_outline(lines, hook_at_start=False, hook_at_end=False):
+    """(vertices, is_closed) of a rebar shape for the sketch: its hook legs
+    dropped, and closed when its two ends meet (a closed stirrup)."""
+    lines = list(lines)
+    if hook_at_start and len(lines) > 2:
+        lines = lines[1:]
+    if hook_at_end and len(lines) > 2:
+        lines = lines[:-1]
+    vertices = chain_vertices(lines)
+    xs = [x for x, _ in vertices]
+    ys = [y for _, y in vertices]
+    size = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
+    first, last = vertices[0], vertices[-1]
+    if len(vertices) >= 4 and math.hypot(first[0] - last[0], first[1] - last[1]) <= 0.15 * size:
+        return clean_polyline(vertices[:-1], closed=True), True
+    return clean_polyline(vertices, closed=False), False
+
+
+def fit_polyline_to_box(points, box):
+    """Stretch a shape to fill box (x0, y0, x1, y1); a straight bar is
+    centered along its missing dimension."""
+    xs = [x for x, _ in points]
+    ys = [y for _, y in points]
+    w, h = max(xs) - min(xs), max(ys) - min(ys)
+    x0, y0, x1, y1 = box
+
+    def along(v, lo, span, a, b):
+        return (a + b) / 2.0 if span < 1e-9 else a + (v - lo) / span * (b - a)
+
+    return [(along(x, min(xs), w, x0, x1), along(y, min(ys), h, y0, y1)) for x, y in points]
