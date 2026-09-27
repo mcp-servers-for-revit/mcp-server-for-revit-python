@@ -363,6 +363,42 @@ def design_from_text(text):
         raise SpecError(u"El dibujo guardado esta danado; vuelve a dibujarlo")
 
 
+# --- configuration files (Acero "Guardar en archivo" / "Abrir archivo") -------
+
+CONFIG_FILE_VERSION = 1
+CONFIG_FORM_KEYS = ("conf", "conf_dist", "edge", "edge_dist", "cover", "nucleo")
+
+
+def config_file_text(type_name, size_cm, form, design):
+    """JSON text of a column type's steel configuration: the stirrup
+    settings of the form, the section drawing and the section size (b, h
+    in cm) it was drawn on."""
+    return json.dumps({
+        "acero_columnas": CONFIG_FILE_VERSION,
+        "tipo": type_name,
+        "seccion_cm": [round(size_cm[0], 1), round(size_cm[1], 1)],
+        "estribos": dict((k, form.get(k) or u"") for k in CONFIG_FORM_KEYS),
+        "dibujo": design_to_text(design),
+    }, indent=2, ensure_ascii=False)
+
+
+def read_config_file(text):
+    """(type name, (b, h) cm, form, design or None) of a configuration file
+    written by `config_file_text` (raises SpecError)."""
+    try:
+        data = json.loads(text)
+        if not isinstance(data, dict) or "acero_columnas" not in data:
+            raise SpecError(u"el archivo no es una configuracion de Acero - Columnas")
+        b, h = data.get("seccion_cm") or (0.0, 0.0)
+        estribos = data.get("estribos") or {}
+        form = dict((k, u"{}".format(estribos.get(k) or u"")) for k in CONFIG_FORM_KEYS)
+        return data.get("tipo") or u"", (float(b), float(h)), form, design_from_text(data.get("dibujo"))
+    except (ValueError, TypeError, AttributeError) as e:
+        if isinstance(e, SpecError):
+            raise
+        raise SpecError(u"el archivo esta danado o no es una configuracion de Acero")
+
+
 def polygon_signed_area(points):
     s = 0.0
     n = len(points)

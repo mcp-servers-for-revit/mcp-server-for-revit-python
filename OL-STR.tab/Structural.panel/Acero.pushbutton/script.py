@@ -7,6 +7,7 @@ en cada tipo de columna."""
 __title__ = "Acero"
 __author__ = "Revit MCP"
 
+import io
 import os
 import re
 import sys
@@ -39,7 +40,7 @@ from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from System.Collections.Generic import List
 from System.Windows import (FontWeights, HorizontalAlignment, Point, Size, Thickness,
                             VerticalAlignment, Visibility)
-from Microsoft.Win32 import OpenFileDialog
+from Microsoft.Win32 import OpenFileDialog, SaveFileDialog
 from Autodesk.Revit.DB.Structure import RebarShape, RebarStyle
 from System.Windows.Input import Key, Keyboard, MouseButton
 from System.Windows.Controls import (Button, Canvas, CheckBox, ListBoxItem, Orientation, StackPanel,
@@ -438,6 +439,67 @@ class AceroWindow(forms.WPFWindow):
                 title="Acero",
             )
         return True
+
+    # -- configuration files --------------------------------------------------
+    def _file_dialog(self, dialog, file_name=u""):
+        dialog.Filter = u"Configuracion de acero (*.json)|*.json"
+        dialog.FileName = file_name
+        folder = os.path.dirname(doc.PathName or u"")
+        if folder and os.path.isdir(folder):
+            dialog.InitialDirectory = folder
+        return dialog.FileName if dialog.ShowDialog(self) else None
+
+    def file_save_click(self, sender, args):
+        """Save the stirrup settings and the section drawing, as they are
+        now, to a file."""
+        t = self.by_id.get(self.state.active)
+        if t is None or t.section is None:
+            forms.alert(u"Elige un tipo con seccion valida.", title="Acero")
+            return
+        path = self._file_dialog(SaveFileDialog(), u"Acero_{}.json".format(re.sub(r'[\\/:*?"<>|]', u"_", t.name)))
+        if not path:
+            return
+        size = (t.section.b * rc.FT * 100, t.section.h * rc.FT * 100)
+        with io.open(path, "w", encoding="utf-8") as f:
+            f.write(rs.config_file_text(t.name, size, self._get_form(), self.design))
+        self._status(u"Configuracion guardada en {}.".format(os.path.basename(path)), error=False)
+
+    def file_open_click(self, sender, args):
+        """Load a saved configuration into the type being edited (saved
+        into the types with 'Guardar configuracion en los tipos marcados')."""
+        t = self.by_id.get(self.state.active)
+        if t is None or t.section is None:
+            forms.alert(u"Elige primero el tipo donde cargar la configuracion.", title="Acero")
+            return
+        path = self._file_dialog(OpenFileDialog())
+        if not path:
+            return
+        try:
+            with io.open(path, encoding="utf-8") as f:
+                name, (b, h), form, design = rs.read_config_file(f.read())
+        except (IOError, rs.SpecError) as e:
+            forms.alert(u"No se pudo abrir {}: {}".format(os.path.basename(path), e), title="Acero")
+            return
+        tb, th = t.section.b * rc.FT * 100, t.section.h * rc.FT * 100
+        if design is not None and (abs(b - tb) > 0.5 or abs(h - th) > 0.5):
+            if not forms.alert(
+                u"El archivo es de {} ({:.0f} x {:.0f} cm) y este tipo es de {:.0f} x {:.0f} cm: "
+                u"su dibujo no encaja en esta seccion.\n\nCargar solo los estribos "
+                u"(diametros, distribucion, recubrimiento y nucleo)?".format(name, b, h, tb, th),
+                title="Acero", yes=True, no=True):
+                return
+            design = None
+        self._push_undo()
+        self._set_form(form)
+        if design is not None:
+            self.design = design
+        self.dirty = True
+        self.draft = []
+        self._select(None)
+        self._status(u"Cargada la configuracion de {}{}. Pulsa 'Guardar configuracion en los tipos "
+                     u"marcados' para guardarla en el tipo.".format(
+                         name, u"" if design is not None else u" (solo estribos)"), error=False)
+        self.redraw()
 
     # -- actions -----------------------------------------------------------
     def pick_click(self, sender, args):
@@ -1696,6 +1758,21 @@ if state.scope == "pick":
     targets = [doc.GetElement(DB.ElementId(i)) for i in state.picked_ids]
     targets = [c for c in targets if c is not None]
     scope_label = "columnas seleccionadas"
+    # The type's configuration fits all its columns: offer them all, on
+    # every level, not just the ones picked.
+    picked_types = sorted(set(id_of(c.GetTypeId()) for c in targets))
+    same_type = [c for t in picked_types for c in by_id[t].columns]
+    if len(same_type) > len(targets):
+        only_picked = u"Solo las columnas seleccionadas ({})".format(len(targets))
+        all_levels = u"Todas las columnas de {} en todos los niveles ({})".format(
+            u", ".join(by_id[t].name for t in picked_types), len(same_type))
+        choice = forms.CommandSwitchWindow.show(
+            [only_picked, all_levels], message=u"Columnas donde generar el acero:")
+        if not choice:
+            script.exit()
+        if choice == all_levels:
+            targets = same_type
+            scope_label = u"todas las columnas de su tipo, en todos los niveles"
 else:
     targets = [c for t in state.checked for c in by_id[t].columns]
     scope_label = "tipos marcados, todo el modelo"

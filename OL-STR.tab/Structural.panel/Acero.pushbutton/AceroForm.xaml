@@ -11,7 +11,7 @@
         <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0" LastChildFill="False">
             <Button DockPanel.Dock="Right" x:Name="button_run" Content="Generar acero..." Width="220" Height="40"
                     FontWeight="Bold" Click="run_click"
-                    ToolTip="Genera las columnas seleccionadas en el modelo; si no hay ninguna, todas las columnas de los tipos marcados."/>
+                    ToolTip="Genera las columnas seleccionadas en el modelo (o, si lo eliges, todas las de su tipo en todos los niveles); si no hay ninguna seleccionada, todas las columnas de los tipos marcados."/>
         </DockPanel>
 
         <Grid>
@@ -46,6 +46,7 @@
                             <RowDefinition Height="30"/>
                             <RowDefinition Height="30"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Text="Estribo de confinamiento &#216;:" VerticalAlignment="Center"
                                    ToolTip="Estribos interiores (los que no abrazan todas las barras) y grapas."/>
@@ -70,7 +71,14 @@
                             <TextBlock Text=" cm" VerticalAlignment="Center"/>
                         </StackPanel>
                         <Button Grid.Row="6" Grid.ColumnSpan="2" x:Name="button_save" Margin="0,8,0,0" Height="30"
-                                Content="Guardar configuraci&#243;n en los tipos marcados" Click="save_click"/>
+                                Content="Guardar configuraci&#243;n en los tipos marcados" Click="save_click"
+                                ToolTip="La configuraci&#243;n queda en el tipo: la usan todas sus columnas, en todos los niveles."/>
+                        <UniformGrid Grid.Row="7" Grid.ColumnSpan="2" Columns="2" Margin="0,6,0,0">
+                            <Button Content="Guardar en archivo..." Height="28" Margin="0,0,3,0" Click="file_save_click"
+                                    ToolTip="Guarda estos estribos y el dibujo de la seccion en un archivo, para usarlos en otro tipo o proyecto."/>
+                            <Button Content="Abrir archivo..." Height="28" Margin="3,0,0,0" Click="file_open_click"
+                                    ToolTip="Carga una configuracion guardada en el tipo elegido; luego pulsa 'Guardar configuracion en los tipos marcados'."/>
+                        </UniformGrid>
                     </Grid>
                 </GroupBox>
 

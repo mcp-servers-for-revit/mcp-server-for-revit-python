@@ -157,6 +157,28 @@ class TestDrawing:
         old["stirrups"] = [("borde", square, 0.008, False)]
         assert design_shapes(old, "stirrups") == [None]
 
+    def test_config_file_roundtrip(self):
+        from revit_mcp.rebar_spec import (
+            add_item, config_file_text, design_shapes, empty_design, read_config_file)
+
+        design = empty_design()
+        design["bars"] = [(-0.09, -0.34, '5/8"'), (0.09, 0.34, '5/8"')]
+        add_item(design, "stirrups", ("borde", [(-0.09, -0.34), (0.09, -0.34), (0.09, 0.34)], 0.008, False), "M_T1")
+        form = {"conf": '3/8"', "conf_dist": "", "edge": '3/8"', "edge_dist": "1@0.05, 5@0.10, rto@0.20",
+                "cover": "4.0", "nucleo": "10"}
+        text = config_file_text(u"C-3_0.25x0.80m", (25.0, 80.0), form, design)
+        name, size, form2, design2 = read_config_file(text)
+        assert name == u"C-3_0.25x0.80m"
+        assert size == (25.0, 80.0)
+        assert form2 == form
+        assert design2["bars"] == design["bars"]
+        assert design_shapes(design2, "stirrups") == ["M_T1"]
+        # a form without drawing reads with design None
+        assert read_config_file(config_file_text(u"X", (20, 60), form, empty_design()))[3] is None
+        for bad in ("{no es json", '{"otra": 1}', "[1, 2]"):
+            with pytest.raises(SpecError):
+                read_config_file(bad)
+
     def test_joint_positions(self):
         from revit_mcp.rebar_spec import joint_positions
 
