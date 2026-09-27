@@ -456,6 +456,42 @@ def clear_top(doc, column, section):
         DB.XYZ(bb.Max.X + reach, bb.Max.Y + reach, section.z_top + 0.01),
     )
     mid = (section.z_bottom + section.z_top) / 2.0
+    # Measured where each element meets the column - its solids cut to the
+    # column's section grown by 5 cm (beams and slabs are cut back by the
+    # column) -, not on its bounding box: a sloped or stepped beam's box
+    # reaches far below the column top.
+    xs = [p[0] for p in section.polygon_m]
+    ys = [p[1] for p in section.polygon_m]
+    grow = 0.05
+    corners = [section.point_m(x, y, mid) for x, y in (
+        (min(xs) - grow, min(ys) - grow), (max(xs) + grow, min(ys) - grow),
+        (max(xs) + grow, max(ys) + grow), (min(xs) - grow, max(ys) + grow))]
+    loop = DB.CurveLoop()
+    for k in range(4):
+        loop.Append(DB.Line.CreateBound(corners[k], corners[(k + 1) % 4]))
+    around = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
+        List[DB.CurveLoop]([loop]), DB.XYZ.BasisZ, section.z_top + 0.01 - mid)
+    options = DB.Options()
+
+    def underside(element):
+        low, failed = None, False
+        for solid in _solids(element.get_Geometry(options)):
+            try:
+                part = DB.BooleanOperationsUtils.ExecuteBooleanOperation(
+                    solid, around, DB.BooleanOperationsType.Intersect)
+            except Exception:
+                failed = True
+                continue
+            if part is None or part.Volume < 1e-6:
+                continue
+            for edge in part.Edges:
+                for p in edge.Tessellate():
+                    low = p.Z if low is None else min(low, p.Z)
+        if low is None and failed:
+            ebb = element.get_BoundingBox(None)
+            low = ebb.Min.Z if ebb is not None else None
+        return low
+
     for bic in (DB.BuiltInCategory.OST_Floors, DB.BuiltInCategory.OST_StructuralFraming):
         best = section.z_top
         found = (
@@ -465,10 +501,10 @@ def clear_top(doc, column, section):
             .WherePasses(DB.BoundingBoxIntersectsFilter(outline))
         )
         for e in found:
-            ebb = e.get_BoundingBox(None)
-            if ebb is not None and mid < ebb.Min.Z < best:
-                best = ebb.Min.Z
-        if best < section.z_top:
+            z = underside(e)
+            if z is not None and mid < z < best:
+                best = z
+        if best < section.z_top - 1e-3:
             return best
     return section.z_top
 
