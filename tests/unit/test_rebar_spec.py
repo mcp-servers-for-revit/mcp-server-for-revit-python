@@ -47,6 +47,10 @@ class TestParsing:
 
 
 class TestStirrups:
+    """The stirrup distribution rules agreed with the user
+    (OL-STR.tab/Structural.panel/Acero.pushbutton/REGLAS_ACERO.md): if one
+    of these fails, the rule was broken - fix the code, not the test."""
+
     def test_both_ends_mirror_each_other(self):
         pos = stirrup_positions(2.65, [(1, 0.05), (10, 0.10)], 0.20)
         assert len(pos) == 24

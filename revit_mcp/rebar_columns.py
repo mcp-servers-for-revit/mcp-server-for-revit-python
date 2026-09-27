@@ -443,7 +443,8 @@ class Section(object):
 
 
 def clear_top(doc, column, section):
-    """Top of the column's clear height, where its stirrup distribution
+    """(Rule agreed with the user, see Acero.pushbutton/REGLAS_ACERO.md.)
+    Top of the column's clear height, where its stirrup distribution
     ends: the underside of the deepest beam framing into its top (where
     beams of different depth meet, always the deepest one), else the
     underside of the slab over it, else the column top. From there up to

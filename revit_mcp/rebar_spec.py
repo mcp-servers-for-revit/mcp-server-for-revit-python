@@ -952,7 +952,10 @@ STIRRUP_MERGE_GAP = 0.01  # two stirrups closer than this are one
 
 
 def stirrup_sets(length, zones, rest):
-    """The stirrup sets of a clear length, in order from the bottom, as
+    """(Rule agreed with the user, see Acero.pushbutton/REGLAS_ACERO.md: do
+    not change it without their say.)
+
+    The stirrup sets of a clear length, in order from the bottom, as
     they are placed on site ('1@.05, 5@.10, rto@.20'), everything measured
     from each end towards the middle, the top mirroring the bottom:
     - every zone is its own set: 1 stirrup at 0.05 (a single one), then 5
