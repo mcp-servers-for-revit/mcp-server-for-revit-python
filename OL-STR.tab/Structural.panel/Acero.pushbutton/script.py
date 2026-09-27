@@ -609,6 +609,7 @@ class AceroWindow(forms.WPFWindow):
         if not hasattr(self, "kind_for"):
             return  # fired while the XAML loads
         self.draft = []
+        self._status()  # the previous tool's hint ("...para la grapa") no longer applies
         for rb, key in self.bar_tools:
             if rb.IsChecked:
                 self.bar_key = key
@@ -1422,8 +1423,8 @@ class AceroWindow(forms.WPFWindow):
             return
         cursor, on_bar = self.snap(frame, args.GetPosition(self.canvas))
         if self._tool() == "bar" and not on_bar:
-            # preview where the bar would sit against a stirrup
-            cursor = self._seat_bar(self.to_m(frame, args.GetPosition(self.canvas))) or cursor
+            # preview where the bar will go (against a stirrup, lined up)
+            cursor = self._place_bar(self.to_m(frame, args.GetPosition(self.canvas)))
         if cursor == self.cursor_m:
             return  # same snapped point: nothing to redraw
         self.cursor_m = cursor
@@ -1439,9 +1440,8 @@ class AceroWindow(forms.WPFWindow):
         tool = self._tool()
         if tool == "bar":
             if not on_bar:
-                seat = self._seat_bar(self.to_m(frame, p))
-                if seat is not None:
-                    point = seat  # against the stirrup
+                # against the stirrup, facing the bars already there
+                point = self._place_bar(self.to_m(frame, p))
                 self._push_undo()
                 self.design["bars"].append((point[0], point[1], self.bar_key))
         elif tool in ("stirrup", "rect"):
@@ -1600,24 +1600,21 @@ class AceroWindow(forms.WPFWindow):
                 rs.remove_item(self.design, kind, i)  # with its shape
             self._select(None)
 
-    def _seat_bar(self, click_m):
-        """A new bar clicked near a closed stirrup sits against its inner
-        face (in a corner when near one); None when not near any."""
-        best = None
+    def _place_bar(self, click_m):
+        """Where a new bar goes (rs.place_bar): against the inner face of
+        the nearest closed stirrup (in its corner near one), lined up with
+        the bars already placed."""
+        stirrups = []
         for kind, poly, wrap, is_open in self.design["stirrups"]:
             if is_open:
                 continue
             key = self._family_key(kind)
             try:
-                outline = rs.stirrup_outline(poly, self.design["bars"], key, wrap)
+                stirrups.append((rs.stirrup_outline(poly, self.design["bars"], key, wrap), key))
             except rs.SpecError:
                 continue
-            seat = rs.bar_seat(click_m, outline, key, self.bar_key)
-            if seat is not None:
-                d = ((seat[0] - click_m[0]) ** 2 + (seat[1] - click_m[1]) ** 2) ** 0.5
-                if best is None or d < best[0]:
-                    best = (d, seat)
-        return best[1] if best else None
+        x, y = rs.place_bar(click_m, self.bar_key, self.design["bars"], stirrups)
+        return (round(x, 4), round(y, 4))
 
     def undo_click(self, sender, args):
         if self.draft:
@@ -1695,11 +1692,22 @@ class AceroWindow(forms.WPFWindow):
             self._set_active_shape(None)
             self._status(u"La forma {} no se puede usar para estribos ni grapas.".format(shape["name"]))
             return
+        straight = not closed and len(vertices) == 2
+        if straight and not (shape["stirrup"] or any(shape["hooks"])):
+            # A straight bar without hooks (M_00) is the longitudinal bar,
+            # not a tie: Revit already gives it to the vertical bars.
+            self._set_active_shape(None)
+            if self._tool() != "bar":
+                self.rb_bar_2.IsChecked = True
+            self._status(u"{} es la barra recta de las barras longitudinales (Revit ya la usa en ellas): "
+                         u"elige el diametro en 'Barras' y haz clic en la planta.".format(shape["name"]),
+                         error=False)
+            return
         self._set_active_shape({
             "name": shape["name"],
             "closed": closed,
             "points": len(vertices),
-            "tie": not closed and len(vertices) == 2,
+            "tie": straight,
         })
 
     def shape_clear_click(self, sender, args):

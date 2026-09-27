@@ -127,6 +127,35 @@ def test_stack_lifts_puts_stirrups_side_by_side():
     assert stack_lifts([]) == []
 
 
+class TestPlaceBar:
+    # a 35 x 80 column, edge stirrup 3/8" on a 4 cm cover: outer face at
+    # x = +-0.135, y = +-0.36; a 3/4" bar sits at 0.135 - 0.0095 - 0.0095
+    outline = [(-0.135, -0.36), (0.135, -0.36), (0.135, 0.36), (-0.135, 0.36)]
+    stirrups = [(outline, '3/8"')]
+    edge = 0.135 - 0.009525 - 0.009525
+
+    def test_sits_against_the_face_and_in_the_corner(self):
+        from revit_mcp.rebar_spec import place_bar
+
+        x, y = place_bar((0.07, 0.10), '3/4"', [], self.stirrups)  # 4.6 cm off the face
+        assert x == pytest.approx(self.edge) and y == pytest.approx(0.10)
+        x, y = place_bar((0.10, 0.31), '3/4"', [], self.stirrups)  # near the corner
+        assert (x, y) == pytest.approx((self.edge, 0.36 - 0.009525 - 0.009525))
+
+    def test_lines_up_with_the_facing_bar(self):
+        from revit_mcp.rebar_spec import place_bar
+
+        bars = [(-self.edge, -0.12, '3/4"')]
+        x, y = place_bar((0.11, -0.135), '3/4"', bars, self.stirrups)
+        assert x == pytest.approx(self.edge) and y == pytest.approx(-0.12)
+
+    def test_far_from_stirrups_only_lines_up(self):
+        from revit_mcp.rebar_spec import place_bar
+
+        bars = [(0.0, 0.2, '5/8"')]
+        assert place_bar((0.01, -0.05), '5/8"', bars, self.stirrups) == pytest.approx((0.0, -0.05))
+
+
 def test_nearest_diameter():
     from revit_mcp.rebar_spec import nearest_diameter
 

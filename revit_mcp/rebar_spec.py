@@ -1046,20 +1046,16 @@ def custom_bar_layout(inner, corner_key, face_x, face_y):
     return bars
 
 
-def bar_seat(click, stirrup_outline, stirrup_key, bar_key, snap=BAR_SEAT_SNAP):
-    """Where a bar clicked at `click` sits against a closed stirrup: its
-    center on the line `stirrup + bar radius` inside the stirrup's inner
-    face (in a corner when the click is near one), or None if the click
-    isn't within `snap` of that line."""
-    ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
-    rb = BAR_DIAMETERS_MM[bar_key] / 2000.0
-    try:
-        seats = offset_polygon_outward(stirrup_outline, -(ds + rb))
-    except SpecError:
-        return None
+BAR_PLACE_SNAP = 0.06  # the bar tool seats a bar on a stirrup this close to it
+BAR_ALIGN_SNAP = 0.03  # ...and lines it up with a bar this close in x or y
+
+
+def _nearest_seat(click, seats, snap):
+    """(distance, point, edge index or None at a corner) of the nearest
+    place on the seat polygon, or None beyond `snap`."""
     for corner in seats:
         if math.hypot(click[0] - corner[0], click[1] - corner[1]) <= snap * 0.7:
-            return corner
+            return (math.hypot(click[0] - corner[0], click[1] - corner[1]), corner, None)
     best = None
     n = len(seats)
     for k in range(n):
@@ -1072,5 +1068,58 @@ def bar_seat(click, stirrup_outline, stirrup_key, bar_key, snap=BAR_SEAT_SNAP):
         px, py = ax + t * dx, ay + t * dy
         d = math.hypot(click[0] - px, click[1] - py)
         if d <= snap and (best is None or d < best[0]):
-            best = (d, (px, py))
-    return best[1] if best else None
+            best = (d, (px, py), k)
+    return best
+
+
+def _align(value, others, tol):
+    near = [o for o in others if abs(o - value) <= tol]
+    return min(near, key=lambda o: abs(o - value)) if near else value
+
+
+def place_bar(click, bar_key, bars, stirrups, snap=BAR_PLACE_SNAP, align=BAR_ALIGN_SNAP):
+    """Where a longitudinal bar clicked at `click` goes. On site every bar
+    is tied to the stirrup: within `snap` of a closed stirrup (`stirrups`:
+    [(outline, stirrup_key)]) the bar sits against its inner face - in its
+    corner near one -, and along that face it lines up with the bars
+    already placed (same x or y within `align`), so facing bars sit face
+    to face. Away from any stirrup it only lines up with the other bars."""
+    rb = BAR_DIAMETERS_MM[bar_key] / 2000.0
+    xs = [x for x, _, _ in bars]
+    ys = [y for _, y, _ in bars]
+    best = None
+    for outline, stirrup_key in stirrups:
+        ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
+        try:
+            seats = offset_polygon_outward(outline, -(ds + rb))
+        except SpecError:
+            continue
+        found = _nearest_seat(click, seats, snap)
+        if found and (best is None or found[0] < best[0][0]):
+            best = (found, seats)
+    if best is None:
+        return (_align(click[0], xs, align), _align(click[1], ys, align))
+    (_, (px, py), edge), seats = best
+    if edge is None:
+        return (px, py)  # a corner
+    (ax, ay), (bx, by) = seats[edge], seats[(edge + 1) % len(seats)]
+    if abs(bx - ax) < 1e-9:  # a face along y: line up in y
+        return (px, max(min(ay, by), min(max(ay, by), _align(py, ys, align))))
+    if abs(by - ay) < 1e-9:  # a face along x: line up in x
+        return (max(min(ax, bx), min(max(ax, bx), _align(px, xs, align))), py)
+    return (px, py)
+
+
+def bar_seat(click, stirrup_outline, stirrup_key, bar_key, snap=BAR_SEAT_SNAP):
+    """Where a bar clicked at `click` sits against a closed stirrup: its
+    center on the line `stirrup + bar radius` inside the stirrup's inner
+    face (in a corner when the click is near one), or None if the click
+    isn't within `snap` of that line."""
+    ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
+    rb = BAR_DIAMETERS_MM[bar_key] / 2000.0
+    try:
+        seats = offset_polygon_outward(stirrup_outline, -(ds + rb))
+    except SpecError:
+        return None
+    found = _nearest_seat(click, seats, snap)
+    return found[1] if found else None
