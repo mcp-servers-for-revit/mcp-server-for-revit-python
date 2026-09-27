@@ -59,7 +59,8 @@ C_CONCRETE = brush(225, 228, 232)
 C_OUTLINE = brush(60, 60, 60)
 C_COVER = brush(150, 150, 150)
 C_BAR = brush(40, 40, 40)
-C_STIRRUP = brush(214, 120, 60)
+C_STIRRUP = brush(214, 120, 60)  # perimeter ("borde") stirrup
+C_CONFINEMENT = brush(40, 150, 90)  # confinement stirrups and ties
 C_DRAFT = brush(40, 110, 220)
 C_CURSOR = brush(40, 110, 220, 160)
 
@@ -93,7 +94,7 @@ class ColumnType(object):
 
     def configured(self):
         cfg = self.config()
-        return bool(cfg["EA_Estribo_Distribucion"] and (cfg["EA_Longitudinal"] or cfg["EA_Seccion_Armado"]))
+        return bool(cfg["EA_Estribo_Borde_Distribucion"] and cfg["EA_Seccion_Armado"])
 
 
 class State(object):
@@ -143,7 +144,8 @@ class AceroWindow(forms.WPFWindow):
         self.cursor_m = None
         self.dirty = False
 
-        self.cbo_stirrup.ItemsSource = List[str](STIRRUP_DIAMETERS)
+        self.cbo_conf.ItemsSource = List[str](STIRRUP_DIAMETERS)
+        self.cbo_edge.ItemsSource = List[str](STIRRUP_DIAMETERS)
         self.cbo_bar.ItemsSource = List[str](BAR_DIAMETERS)
         self.cbo_bar.SelectedItem = u'5/8"'
         self.levels = sorted(
@@ -211,10 +213,11 @@ class AceroWindow(forms.WPFWindow):
                 self.list_types.SelectedItem = item
         cfg = t.config()
         self._set_form({
-            "long": cfg["EA_Longitudinal"],
-            "stirrup": cfg["EA_Estribo_Diametro"] or u'3/8"',
+            "conf": cfg["EA_Estribo_Conf_Diametro"] or u'3/8"',
+            "conf_dist": cfg["EA_Estribo_Conf_Distribucion"],
+            "edge": cfg["EA_Estribo_Borde_Diametro"] or u'3/8"',
+            "edge_dist": cfg["EA_Estribo_Borde_Distribucion"],
             "cover": cfg["EA_Recubrimiento_cm"] or str(rc.default_cover_cm(t.name)),
-            "dist": cfg["EA_Estribo_Distribucion"],
             "nucleo": cfg["EA_Nucleo_cm"],
         })
         if type_id in self.state.drafts:
@@ -243,28 +246,31 @@ class AceroWindow(forms.WPFWindow):
 
     # -- form --------------------------------------------------------------
     def _set_form(self, f):
-        self.txt_long.Text = f.get("long") or u""
-        self.cbo_stirrup.SelectedItem = f.get("stirrup") if f.get("stirrup") in STIRRUP_DIAMETERS else u'3/8"'
+        for combo, key in ((self.cbo_conf, "conf"), (self.cbo_edge, "edge")):
+            combo.SelectedItem = f.get(key) if f.get(key) in STIRRUP_DIAMETERS else u'3/8"'
+        self.txt_conf_dist.Text = f.get("conf_dist") or u""
+        self.txt_edge_dist.Text = f.get("edge_dist") or u""
         self.txt_cover.Text = f.get("cover") or u""
-        self.txt_dist.Text = f.get("dist") or u""
         self.chk_nucleo.IsChecked = bool(f.get("nucleo"))
         self.txt_nucleo.Text = f.get("nucleo") or u"10"
 
     def _get_form(self):
         return {
-            "long": (self.txt_long.Text or u"").strip(),
-            "stirrup": self.cbo_stirrup.SelectedItem or u'3/8"',
+            "conf": self.cbo_conf.SelectedItem or u'3/8"',
+            "conf_dist": (self.txt_conf_dist.Text or u"").strip(),
+            "edge": self.cbo_edge.SelectedItem or u'3/8"',
+            "edge_dist": (self.txt_edge_dist.Text or u"").strip(),
             "cover": (self.txt_cover.Text or u"").strip(),
-            "dist": (self.txt_dist.Text or u"").strip(),
             "nucleo": (self.txt_nucleo.Text or u"").strip() if self.chk_nucleo.IsChecked else u"",
         }
 
     def _config_from_form(self, with_drawing):
         f = self._get_form()
         config = {
-            "EA_Longitudinal": f["long"],
-            "EA_Estribo_Diametro": f["stirrup"],
-            "EA_Estribo_Distribucion": f["dist"],
+            "EA_Estribo_Conf_Diametro": f["conf"],
+            "EA_Estribo_Conf_Distribucion": f["conf_dist"],
+            "EA_Estribo_Borde_Diametro": f["edge"],
+            "EA_Estribo_Borde_Distribucion": f["edge_dist"],
             "EA_Recubrimiento_cm": f["cover"],
             "EA_Nucleo_cm": f["nucleo"],
         }
@@ -291,9 +297,14 @@ class AceroWindow(forms.WPFWindow):
                 for p, q in zip(s.polygon_m, a.polygon_m)
             ) and len(s.polygon_m) == len(a.polygon_m):
                 same_section.append(type_id)
+        has_drawing = bool(self.design["bars"] or self.design["stirrups"] or self.design["ties"])
         try:
             for type_id in targets:
-                rc.ColumnSpec(self._config_from_form(type_id in same_section))
+                # The drawing is checked only where it gets saved.
+                rc.ColumnSpec(
+                    self._config_from_form(type_id in same_section),
+                    require_design=has_drawing and type_id in same_section,
+                )
         except rs.SpecError as e:
             forms.alert(u"Revisa la configuracion: {}".format(e), title="Acero")
             return False
@@ -309,10 +320,10 @@ class AceroWindow(forms.WPFWindow):
         self.dirty = False
         self._refresh_type_labels()
         skipped = [self.by_id[t].name for t in targets if t not in same_section]
-        if skipped and (self.design["bars"] or self.design["stirrups"] or self.design["ties"]):
+        if skipped and has_drawing:
             forms.alert(
-                u"Configuracion guardada. El dibujo solo se guardo en los tipos con la "
-                u"misma seccion; estos quedan con la distribucion automatica:\n- "
+                u"Configuracion de estribos guardada. El dibujo solo se guardo en los tipos "
+                u"con la misma seccion; estos necesitan su propio dibujo:\n- "
                 + u"\n- ".join(skipped),
                 title="Acero",
             )
@@ -430,7 +441,8 @@ class AceroWindow(forms.WPFWindow):
             return
         section, scale = frame[0], frame[1]
         self._polyline(frame, section.polygon_m, C_OUTLINE, 2, closed=True, fill=C_CONCRETE)
-        stirrup_key = self.cbo_stirrup.SelectedItem or u'3/8"'
+        edge_key = self.cbo_edge.SelectedItem or u'3/8"'
+        conf_key = self.cbo_conf.SelectedItem or u'3/8"'
         try:
             cover = float((self.txt_cover.Text or u"4").replace(u",", u".")) / 100.0
             self._polyline(frame, rs.offset_polygon_outward(section.polygon_m, -cover), C_COVER, 1,
@@ -438,18 +450,24 @@ class AceroWindow(forms.WPFWindow):
         except Exception:
             pass
         for poly in self.design["stirrups"]:
+            # Perimeter ("borde", orange) vs confinement (green) stirrup.
+            if rs.is_edge_stirrup(poly, self.design["bars"]):
+                key, color = edge_key, C_STIRRUP
+            else:
+                key, color = conf_key, C_CONFINEMENT
             try:
-                line = rs.stirrup_centerline(poly, self.design["bars"], stirrup_key)
+                line = rs.stirrup_centerline(poly, self.design["bars"], key)
             except rs.SpecError:
                 line = poly
-            self._polyline(frame, line, C_STIRRUP, max(2, rs.BAR_DIAMETERS_MM[stirrup_key] / 1000.0 * scale),
+            self._polyline(frame, line, color, max(2, rs.BAR_DIAMETERS_MM[key] / 1000.0 * scale),
                            closed=True)
         for a, b in self.design["ties"]:
             try:
-                a2, b2 = rs.tie_centerline(a, b, self.design["bars"], stirrup_key)
+                a2, b2 = rs.tie_centerline(a, b, self.design["bars"], conf_key)
             except rs.SpecError:
                 a2, b2 = a, b
-            self._polyline(frame, [a2, b2], C_STIRRUP, max(2, rs.BAR_DIAMETERS_MM[stirrup_key] / 1000.0 * scale))
+            self._polyline(frame, [a2, b2], C_CONFINEMENT,
+                           max(2, rs.BAR_DIAMETERS_MM[conf_key] / 1000.0 * scale))
         for x, y, key in self.design["bars"]:
             self._dot(frame, x, y, max(3.5, rs.BAR_DIAMETERS_MM[key] / 2000.0 * scale), C_BAR)
         if self.draft:
@@ -539,11 +557,12 @@ class AceroWindow(forms.WPFWindow):
             return
         f = self._get_form()
         try:
-            groups = rs.parse_longitudinal(f["long"])
+            groups = rs.parse_longitudinal(self.txt_auto_long.Text)
             cover = float(f["cover"].replace(u",", u".")) / 100.0
-            design = rs.auto_design(section.b * rc.FT, section.h * rc.FT, cover, f["stirrup"], groups)
+            design = rs.auto_design(section.b * rc.FT, section.h * rc.FT, cover, f["edge"], groups)
         except (rs.SpecError, ValueError) as e:
-            forms.alert(u"Revisa Longitudinal/Recubrimiento: {}".format(e), title="Acero")
+            forms.alert(u"Revisa las barras de Automatico (ej. 8Ø5/8\") y el recubrimiento: {}".format(e),
+                        title="Acero")
             return
         self._push_undo()
         self.design = design
@@ -648,8 +667,9 @@ dry_run = mode.startswith("Vista previa")
 bar_types = rc.BarTypes(doc)
 hooks = rc.StirrupHooks(doc)
 warnings = [u"{}: sin generar - {}".format(by_id[t].name, e) for t, e in spec_errors.items()]
-stick_out = {}  # type name -> (columns whose stirrup hooks leave the section, hook)
-by_type = {}  # type name -> [columns, long kg, stirrup kg, bars]
+stick_out = {}  # type name -> columns where a stirrup/tie hook leaves the section
+KINDS = (rc.LONGITUDINAL, rc.EDGE, rc.CONFINEMENT)
+by_type = {}  # type name -> {"n": columns, kind: kg}
 total_bars = 0
 
 t = DB.Transaction(doc, "Acero")
@@ -660,30 +680,28 @@ try:
     with forms.ProgressBar(title="Acero: {value} de {max_value} columnas") as pb:
         for i, column in enumerate(with_spec):
             ct = by_id[id_of(column.GetTypeId())]
-            column_spec = specs[ct.id]
             sub = DB.SubTransaction(doc)
             sub.Start()
             try:
                 created = rc.generate_column(
-                    doc, column, column_spec, bar_types, hooks, rc.type_mark(ct.name)
+                    doc, column, specs[ct.id], bar_types, hooks, rc.type_mark(ct.name)
                 )
                 sub.Commit()
-                done.append((column, ct.name, hooks.get(column_spec.stirrup_key), created))
+                done.append((column, ct.name, created))
             except Exception as e:
                 sub.RollBack()
                 warnings.append(u"Columna {} ({}): {}".format(id_of(column.Id), ct.name, e))
             pb.update_progress(i + 1, len(with_spec))
 
     doc.Regenerate()  # bar lengths are only known after a regeneration
-    for column, type_name, hook, created in done:
-        long_kg, stirrup_kg, bars, sticks = rc.record_weight(column, created)
+    for column, type_name, created in done:
+        kg, bars, sticks = rc.record_weight(column, created)
         if sticks:
-            stick_out[type_name] = (stick_out.get(type_name, (0, hook))[0] + 1, hook)
-        agg = by_type.setdefault(type_name, [0, 0.0, 0.0, 0])
-        agg[0] += 1
-        agg[1] += long_kg
-        agg[2] += stirrup_kg
-        agg[3] += bars
+            stick_out[type_name] = stick_out.get(type_name, 0) + 1
+        agg = by_type.setdefault(type_name, dict([("n", 0)] + [(k, 0.0) for k in KINDS]))
+        agg["n"] += 1
+        for kind in KINDS:
+            agg[kind] += kg[kind]
         total_bars += bars
 
     if dry_run:
@@ -697,24 +715,28 @@ except Exception:
 
 output.print_md("# Resultado Acero - Columnas {}".format("(vista previa)" if dry_run else ""))
 output.print_md(u"**Alcance:** {}".format(scope_label))
-output.print_md("**Columnas armadas:** {}".format(sum(v[0] for v in by_type.values())))
+output.print_md("**Columnas armadas:** {}".format(sum(v["n"] for v in by_type.values())))
 if not dry_run:
     output.print_md("**Barras creadas:** {}".format(total_bars))
 skipped = len(targets) - len(with_spec)
 if skipped:
     output.print_md("**Columnas sin configuracion (omitidas):** {}".format(skipped))
 
-output.print_md("\n| Tipo | Columnas | Longitudinal (kg) | Estribos y grapas (kg) | Total (kg) |")
-output.print_md("|---|---|---|---|---|")
-grand = [0.0, 0.0]
+output.print_md(
+    u"\n| Tipo | Columnas | Longitudinal (kg) | Estribo de borde (kg) "
+    u"| Confinamiento y grapas (kg) | Total (kg) |"
+)
+output.print_md("|---|---|---|---|---|---|")
+grand = dict((k, 0.0) for k in KINDS)
 for type_name in sorted(by_type):
-    n, long_kg, stirrup_kg, _ = by_type[type_name]
-    grand[0] += long_kg
-    grand[1] += stirrup_kg
-    output.print_md(u"| {} | {} | {:.2f} | {:.2f} | {:.2f} |".format(
-        type_name, n, long_kg, stirrup_kg, long_kg + stirrup_kg))
-output.print_md("| **Total** | | **{:.2f}** | **{:.2f}** | **{:.2f}** |".format(
-    grand[0], grand[1], grand[0] + grand[1]))
+    agg = by_type[type_name]
+    for kind in KINDS:
+        grand[kind] += agg[kind]
+    output.print_md(u"| {} | {} | {:.2f} | {:.2f} | {:.2f} | {:.2f} |".format(
+        type_name, agg["n"], agg[rc.LONGITUDINAL], agg[rc.EDGE], agg[rc.CONFINEMENT],
+        sum(agg[k] for k in KINDS)))
+output.print_md("| **Total** | | **{:.2f}** | **{:.2f}** | **{:.2f}** | **{:.2f}** |".format(
+    grand[rc.LONGITUDINAL], grand[rc.EDGE], grand[rc.CONFINEMENT], sum(grand.values())))
 
 output.print_md(
     "\n*Longitudinales rectas de piso a piso (sin empalmes ni anclajes). "
@@ -722,11 +744,9 @@ output.print_md(
     "(y en el nucleo si se configuro).*"
 )
 for type_name in sorted(stick_out):
-    count, hook = stick_out[type_name]
     warnings.append(
-        u"{}: en {} columna(s) el gancho de los estribos ({}) sobresale de la seccion; "
-        u"conviene un gancho mas corto para ese diametro.".format(
-            type_name, count, rc.element_name(hook) if hook else u"sin gancho")
+        u"{}: en {} columna(s) el gancho de algun estribo o grapa sobresale de la seccion; "
+        u"conviene un gancho mas corto para ese diametro.".format(type_name, stick_out[type_name])
     )
 if warnings:
     output.print_md("\n### Advertencias ({})".format(len(warnings)))

@@ -420,3 +420,15 @@ def joint_positions(joint_length, spacing, end_clear=0.05):
     if not positions and joint_length > 2 * end_clear:
         positions.append(joint_length / 2.0)
     return positions
+
+
+def is_edge_stirrup(polygon, bars, tol=0.005):
+    """A stirrup drawn around every longitudinal bar is the perimeter
+    ("borde") stirrup; one around only some of them is a confinement
+    ("confinamiento") stirrup."""
+    if not bars:
+        return True
+    for x, y, _ in bars:
+        if not (point_in_polygon((x, y), polygon) or distance_to_polygon((x, y), polygon) <= tol):
+            return False
+    return True

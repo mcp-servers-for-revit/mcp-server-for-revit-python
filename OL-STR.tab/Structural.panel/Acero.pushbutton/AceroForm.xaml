@@ -44,10 +44,10 @@
                 <CheckBox DockPanel.Dock="Top" x:Name="chk_all" Content="Seleccionar todo" Margin="0,0,0,4"
                           Click="all_click"/>
 
-                <GroupBox DockPanel.Dock="Bottom" Header="2. Configuracion (tipos marcados)" Margin="0,8,0,0" Padding="6,4,6,6">
+                <GroupBox DockPanel.Dock="Bottom" Header="2. Configuraci&#243;n de estribos" Margin="0,8,0,0" Padding="6,4,6,6">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="170"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
@@ -56,28 +56,33 @@
                             <RowDefinition Height="30"/>
                             <RowDefinition Height="30"/>
                             <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Text="Longitudinal:" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="txt_long" VerticalAlignment="Center"
-                                 ToolTip="Ej. 8&#216;5/8&quot;  o  4&#216;3/4&quot; + 4&#216;5/8&quot;. Opcional si dibujas las barras."/>
-                        <TextBlock Grid.Row="1" Text="Estribo &#216;:" VerticalAlignment="Center"/>
-                        <ComboBox Grid.Row="1" Grid.Column="1" x:Name="cbo_stirrup" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Row="2" Text="Recubrimiento (cm):" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="txt_cover" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Row="3" Text="Distribucion:" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="txt_dist" VerticalAlignment="Center"
+                        <TextBlock Grid.Row="0" Text="Estribo de confinamiento &#216;:" VerticalAlignment="Center"
+                                   ToolTip="Estribos interiores (los que no abrazan todas las barras) y grapas."/>
+                        <ComboBox Grid.Row="0" Grid.Column="1" x:Name="cbo_conf" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="1" Text="     Distribuci&#243;n:" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="txt_conf_dist" VerticalAlignment="Center"
+                                 ToolTip="Desde cada extremo, en la luz libre. Ej. 1@5 6@10 Rto@25. Vacio si no hay estribos interiores ni grapas."/>
+                        <TextBlock Grid.Row="2" Text="Estribo de borde &#216;:" VerticalAlignment="Center"
+                                   ToolTip="Estribo perimetral (el que abraza todas las barras)."/>
+                        <ComboBox Grid.Row="2" Grid.Column="1" x:Name="cbo_edge" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Row="3" Text="     Distribuci&#243;n:" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="txt_edge_dist" VerticalAlignment="Center"
                                  ToolTip="Desde cada extremo, en la luz libre. Ej. 1@5 6@10 Rto@25  o  1@.05, 10@.10, rto@.20"/>
-                        <CheckBox Grid.Row="4" x:Name="chk_nucleo" Content="Estribo en nucleo" VerticalAlignment="Center"
+                        <TextBlock Grid.Row="4" Text="Recubrimiento (cm):" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="txt_cover" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="5" x:Name="chk_nucleo" Content="Estribo en n&#250;cleo" VerticalAlignment="Center"
                                   ToolTip="Estribos tambien dentro del nudo viga-columna (desde el fondo de la viga hasta el tope)."/>
-                        <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
                                     IsEnabled="{Binding IsChecked, ElementName=chk_nucleo}">
                             <TextBlock Text="@ " VerticalAlignment="Center"/>
                             <TextBox x:Name="txt_nucleo" Width="50"/>
                             <TextBlock Text=" cm" VerticalAlignment="Center"/>
                         </StackPanel>
-                        <Button Grid.Row="5" Grid.ColumnSpan="2" x:Name="button_save" Margin="0,8,0,0" Height="30"
-                                Content="Guardar configuracion en los tipos marcados" Click="save_click"/>
+                        <Button Grid.Row="6" Grid.ColumnSpan="2" x:Name="button_save" Margin="0,8,0,0" Height="30"
+                                Content="Guardar configuraci&#243;n en los tipos marcados" Click="save_click"/>
                     </Grid>
                 </GroupBox>
 
@@ -95,13 +100,15 @@
                     <RadioButton x:Name="rb_stirrup" GroupName="tool" Content="Estribo" IsChecked="True" Margin="0,0,8,0" VerticalAlignment="Center"/>
                     <RadioButton x:Name="rb_tie" GroupName="tool" Content="Grapa" Margin="0,0,8,0" VerticalAlignment="Center"/>
                     <RadioButton x:Name="rb_erase" GroupName="tool" Content="Borrar" Margin="0,0,16,0" VerticalAlignment="Center"/>
-                    <Button Content="Automatico" Width="85" Margin="0,0,4,0" Click="auto_click"
-                            ToolTip="Barras segun el texto Longitudinal y un estribo perimetral (solo secciones rectangulares)."/>
+                    <TextBox x:Name="txt_auto_long" Width="110" Margin="0,0,4,0" VerticalAlignment="Center"
+                             ToolTip="Barras para Autom&#225;tico. Ej. 8&#216;5/8&quot;  o  4&#216;3/4&quot; + 4&#216;5/8&quot;"/>
+                    <Button Content="Autom&#225;tico" Width="85" Margin="0,0,4,0" Click="auto_click"
+                            ToolTip="Reparte esas barras y dibuja el estribo de borde (solo secciones rectangulares)."/>
                     <Button Content="Deshacer" Width="70" Margin="0,0,4,0" Click="undo_click"/>
                     <Button Content="Limpiar" Width="65" Click="clear_click"/>
                 </WrapPanel>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
-                           Text="Estribo: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo. Grapa: clic en dos barras. Barra: clic donde va. Los puntos se ajustan a las barras y a 1 cm. El dibujo se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
+                           Text="Estribo: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; el que abraza todas las barras es de borde (naranja), los demas de confinamiento (verde). Grapa: clic en dos barras (usa el confinamiento). Barra: clic donde va. Los puntos se ajustan a las barras y a 1 cm. El dibujo se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
                 <Border BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White" ClipToBounds="True">
                     <Canvas x:Name="canvas" Background="White"
                             MouseLeftButtonDown="canvas_left" MouseRightButtonDown="canvas_right"

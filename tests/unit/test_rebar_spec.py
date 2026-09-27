@@ -137,3 +137,14 @@ class TestDrawing:
 
         assert joint_positions(0.60, 0.10) == pytest.approx([0.1, 0.2, 0.3, 0.4, 0.5])
         assert joint_positions(0.12, 0.15) == pytest.approx([0.06])
+
+
+def test_edge_vs_confinement_stirrups():
+    from revit_mcp.rebar_spec import is_edge_stirrup
+
+    bars = [(-0.1, -0.3, '5/8"'), (0.1, -0.3, '5/8"'), (0.1, 0.3, '5/8"'), (-0.1, 0.3, '5/8"'),
+            (-0.1, 0.0, '5/8"'), (0.1, 0.0, '5/8"')]
+    outer = [(-0.1, -0.3), (0.1, -0.3), (0.1, 0.3), (-0.1, 0.3)]
+    inner = [(-0.1, -0.3), (0.1, -0.3), (0.1, 0.0), (-0.1, 0.0)]
+    assert is_edge_stirrup(outer, bars)
+    assert not is_edge_stirrup(inner, bars)

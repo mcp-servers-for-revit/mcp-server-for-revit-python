@@ -63,11 +63,17 @@ def remove_obsolete_parameters(doc):
     """Unbind OBSOLETE_ELEMENT_PARAMS from the project (their values go
     with them). Must run inside an active Transaction. Returns the names
     removed."""
+    return unbind_parameters(doc, OBSOLETE_ELEMENT_PARAMS)
+
+
+def unbind_parameters(doc, names):
+    """Unbind the named project parameters (their values go with them).
+    Must run inside an active Transaction. Returns the names removed."""
     binding_map = doc.ParameterBindings
     found = []
     iterator = binding_map.ForwardIterator()
     while iterator.MoveNext():
-        if iterator.Key.Name in OBSOLETE_ELEMENT_PARAMS:
+        if iterator.Key.Name in names:
             found.append(iterator.Key)
     for definition in found:
         binding_map.Remove(definition)

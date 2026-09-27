@@ -5,18 +5,19 @@ Column Rebar Module for Revit MCP ("Acero": columns)
 Builds real Revit Rebar in concrete columns from a configuration stored
 in the column type's parameters:
 
-- EA_Longitudinal          e.g. 8Ø5/8"  or  4Ø3/4" + 4Ø5/8"
-- EA_Estribo_Diametro      e.g. 3/8"
-- EA_Estribo_Distribucion  e.g. 1@.05, 10@.10, rto@.20  (or 1@5 6@10 Rto@25)
+- EA_Estribo_Borde_Diametro / _Distribucion   perimeter stirrup, e.g. 3/8"
+                                              and 1@.05, 10@.10, rto@.20
+- EA_Estribo_Conf_Diametro / _Distribucion    inner (confinement) stirrups
+                                              and crossties (grapas)
 - EA_Recubrimiento_cm      e.g. 4
 - EA_Nucleo_cm             stirrup spacing inside the beam-column joint
                            (blank = no stirrups in the joint)
-- EA_Seccion_Armado        hand-drawn section (JSON, see rebar_spec): bars,
-                           closed stirrups and crossties (grapas)
+- EA_Seccion_Armado        hand-drawn section (JSON, see rebar_spec): the
+                           longitudinal bars, closed stirrups and grapas
 
-With a drawing, its bars/stirrups/ties are used as drawn (any section
-shape: rectangle, trapezoid, L, T...). Without one, a rectangular section
-gets the automatic layout from EA_Longitudinal and one perimeter stirrup.
+The drawing is used as drawn (any section shape: rectangle, trapezoid,
+L, T...). A drawn stirrup around every bar is the perimeter ("borde")
+one; any other stirrup is a confinement one.
 
 Longitudinal bars run the column's full height (level to level; laps and
 anchorages are not modeled). Stirrups and ties are laid out from both ends
@@ -48,13 +49,23 @@ from utils import element_id_value
 FT = 0.3048  # m per ft
 GROUP_NAME = "Acero"
 TYPE_PARAMS = (
-    "EA_Longitudinal",
-    "EA_Estribo_Diametro",
-    "EA_Estribo_Distribucion",
+    "EA_Estribo_Borde_Diametro",
+    "EA_Estribo_Borde_Distribucion",
+    "EA_Estribo_Conf_Diametro",
+    "EA_Estribo_Conf_Distribucion",
     "EA_Recubrimiento_cm",
     "EA_Nucleo_cm",
     "EA_Seccion_Armado",
 )
+# Parameters of the first version: their values move to the new ones
+# (None = dropped: longitudinal bars are now only drawn), then they are
+# unbound.
+OBSOLETE_TYPE_PARAMS = {
+    "EA_Estribo_Diametro": "EA_Estribo_Borde_Diametro",
+    "EA_Estribo_Distribucion": "EA_Estribo_Borde_Distribucion",
+    "EA_Longitudinal": None,
+}
+EDGE, CONFINEMENT, LONGITUDINAL = "borde", "confinamiento", "longitudinal"
 WEIGHT_PARAM = "EA_Peso_Acero_kg"
 ORIGIN_PARAM = "EA_Origen_Id"
 DEFAULT_COVER_CM = 4.0  # E.060 columns
@@ -83,7 +94,31 @@ def ensure_parameters(doc):
     specs = [(name, True, columns, False) for name in TYPE_PARAMS]
     specs.append((WEIGHT_PARAM, False, columns, True))
     specs.append((ORIGIN_PARAM, True, [DB.BuiltInCategory.OST_Rebar], True))
-    return fw_params.ensure_parameters(doc, GROUP_NAME, specs)
+    warnings = fw_params.ensure_parameters(doc, GROUP_NAME, specs)
+    try:
+        _migrate_obsolete(doc)
+        fw_params.unbind_parameters(doc, list(OBSOLETE_TYPE_PARAMS))
+    except Exception as e:
+        warnings.append(u"No se pudieron migrar los parametros anteriores: {}".format(e))
+    return warnings
+
+
+def _migrate_obsolete(doc):
+    types = (
+        DB.FilteredElementCollector(doc)
+        .OfCategory(DB.BuiltInCategory.OST_StructuralColumns)
+        .WhereElementIsElementType()
+    )
+    for column_type in types:
+        for old, new in OBSOLETE_TYPE_PARAMS.items():
+            if new is None:
+                continue
+            p_old = column_type.LookupParameter(old)
+            p_new = column_type.LookupParameter(new)
+            if p_old is None or p_new is None or p_new.IsReadOnly:
+                continue
+            if (p_old.AsString() or u"") and not (p_new.AsString() or u""):
+                p_new.Set(p_old.AsString())
 
 
 def type_mark(type_name):
@@ -129,30 +164,57 @@ def _float_cm(text, label, lo, hi):
     return value / 100.0
 
 
-class ColumnSpec(object):
-    """Parsed configuration of one column type (raises spec.SpecError)."""
+class StirrupFamily(object):
+    """Diameter and distribution of one kind of stirrup."""
 
-    def __init__(self, config):
-        self.stirrup_key = spec.parse_diameter(config.get("EA_Estribo_Diametro"))
-        self.zones, self.rest = spec.parse_distribution(config.get("EA_Estribo_Distribucion"))
+    def __init__(self, diameter_text, distribution_text, label):
+        try:
+            self.key = spec.parse_diameter(diameter_text)
+            self.zones, self.rest = spec.parse_distribution(distribution_text)
+        except spec.SpecError as e:
+            raise spec.SpecError(u"{}: {}".format(label, e))
+
+
+class ColumnSpec(object):
+    """Parsed configuration of one column type (raises spec.SpecError).
+    `require_design`: False to check only the stirrup settings (saving a
+    configuration before the section is drawn)."""
+
+    def __init__(self, config, require_design=True):
+        self.edge = StirrupFamily(
+            config.get("EA_Estribo_Borde_Diametro"),
+            config.get("EA_Estribo_Borde_Distribucion"),
+            u"Estribo de borde",
+        )
+        conf_d = (config.get("EA_Estribo_Conf_Diametro") or u"").strip()
+        conf_dist = (config.get("EA_Estribo_Conf_Distribucion") or u"").strip()
+        self.confinement = (
+            StirrupFamily(conf_d, conf_dist, u"Estribo de confinamiento")
+            if conf_dist else None
+        )
         self.cover_m = _float_cm(config.get("EA_Recubrimiento_cm") or u"", u"Recubrimiento", 1, 10)
         nucleus = (config.get("EA_Nucleo_cm") or u"").strip()
         self.joint_spacing_m = _float_cm(nucleus, u"Espaciamiento en nucleo", 3, 30) if nucleus else None
         self.design = spec.design_from_text(config.get("EA_Seccion_Armado"))
-        longitudinal = (config.get("EA_Longitudinal") or u"").strip()
-        self.groups = spec.parse_longitudinal(longitudinal) if longitudinal else None
-        if not self.groups and not (self.design and self.design["bars"]):
-            raise spec.SpecError(u"Falta el acero longitudinal (texto o barras dibujadas)")
-
-    def design_for(self, section):
-        """The drawing, or the automatic layout of a rectangular section."""
-        if self.design and self.design["bars"]:
-            return self.design
-        if not section.is_rectangle:
-            raise spec.SpecError(u"seccion no rectangular: dibuja el armado")
-        return spec.auto_design(
-            section.b * FT, section.h * FT, self.cover_m, self.stirrup_key, self.groups
+        if not require_design:
+            return
+        if not (self.design and self.design["bars"]):
+            raise spec.SpecError(u"dibuja las barras longitudinales de la seccion (o usa Automatico)")
+        if not self.design["stirrups"]:
+            raise spec.SpecError(u"dibuja al menos el estribo de borde")
+        needs_confinement = self.design["ties"] or any(
+            not spec.is_edge_stirrup(poly, self.design["bars"]) for poly in self.design["stirrups"]
         )
+        if needs_confinement and self.confinement is None:
+            raise spec.SpecError(
+                u"el dibujo tiene estribos de confinamiento o grapas: falta su diametro y distribucion"
+            )
+
+    def family_of(self, polygon):
+        """(kind, StirrupFamily) of a drawn stirrup."""
+        if spec.is_edge_stirrup(polygon, self.design["bars"]):
+            return EDGE, self.edge
+        return CONFINEMENT, self.confinement
 
 
 class BarTypes(object):
@@ -340,26 +402,24 @@ def _tag(rebar, column):
         p.Set(str(element_id_value(column.Id)))
 
 
-def _runs(column_spec, section, z_clear_top):
-    """(z_start_ft, count, spacing_ft) runs of stirrups/ties: the clear
-    height distribution, plus the joint when EA_Nucleo_cm is set."""
+def _runs(family, joint_spacing_m, section, z_clear_top):
+    """(z_start_ft, count, spacing_ft) runs of one stirrup family: its
+    clear-height distribution, plus the joint when EA_Nucleo_cm is set."""
     clear_m = (z_clear_top - section.z_bottom) * FT
     runs = [
         (section.z_bottom + start / FT, n, spacing / FT)
         for start, n, spacing in spec.group_runs(
-            spec.stirrup_positions(clear_m, column_spec.zones, column_spec.rest)
+            spec.stirrup_positions(clear_m, family.zones, family.rest)
         )
     ]
-    if column_spec.joint_spacing_m and section.z_top - z_clear_top > 0.1 / FT:
-        joint = spec.joint_positions(
-            (section.z_top - z_clear_top) * FT, column_spec.joint_spacing_m
-        )
+    if joint_spacing_m and section.z_top - z_clear_top > 0.1 / FT:
+        joint = spec.joint_positions((section.z_top - z_clear_top) * FT, joint_spacing_m)
         for start, n, spacing in spec.group_runs(joint):
             runs.append((z_clear_top + start / FT, n, spacing / FT))
     return runs
 
 
-def _set(doc, rebar, n, spacing_ft):
+def _set(rebar, n, spacing_ft):
     if n > 1:
         rebar.GetShapeDrivenAccessor().SetLayoutAsNumberWithSpacing(
             n, spacing_ft, True, True, True
@@ -367,71 +427,78 @@ def _set(doc, rebar, n, spacing_ft):
 
 
 def generate_column(doc, column, column_spec, bar_types, hooks, mark):
-    """Create the column's longitudinal bars, stirrups and ties (inside an
-    active Transaction; Revit needs a Regenerate before their lengths are
-    known, see `record_weight`). Returns [(rebar, diameter_key,
-    is_stirrup)]."""
+    """Create the column's longitudinal bars, stirrups and ties from its
+    drawing (inside an active Transaction; Revit needs a Regenerate before
+    their lengths are known, see `record_weight`). Perimeter stirrups use
+    the edge ("borde") settings; inner stirrups and ties the confinement
+    ones. Returns [(rebar, diameter_key, kind)]."""
     section = Section(column)
-    design = column_spec.design_for(section)
-    stirrup_key = column_spec.stirrup_key
-    stirrup_type = bar_types.pick(stirrup_key, mark)
-    if stirrup_type is None:
-        raise spec.SpecError(u"no hay tipo de barra de {}".format(stirrup_key))
-    hook = hooks.get(stirrup_key)
+    design = column_spec.design
+
+    def bar_type_for(key):
+        bar_type = bar_types.pick(key, mark)
+        if bar_type is None:
+            raise spec.SpecError(u"no hay tipo de barra de {}".format(key))
+        return bar_type
 
     delete_generated(doc, column)
     created = []
 
     normal = section.transform.BasisX
     for x, y, key in design["bars"]:
-        bar_type = bar_types.pick(key, mark)
-        if bar_type is None:
-            raise spec.SpecError(u"no hay tipo de barra de {}".format(key))
         line = DB.Line.CreateBound(
             section.point_m(x, y, section.z_bottom), section.point_m(x, y, section.z_top)
         )
         rebar = Rebar.CreateFromCurves(
-            doc, RebarStyle.Standard, bar_type, None, None, column, normal,
+            doc, RebarStyle.Standard, bar_type_for(key), None, None, column, normal,
             List[DB.Curve]([line]),
             RebarHookOrientation.Right, RebarHookOrientation.Right, True, True,
         )
         _tag(rebar, column)
-        created.append((rebar, key, False))
+        created.append((rebar, key, LONGITUDINAL))
 
-    runs = _runs(column_spec, section, clear_top(doc, column, section))
-    stirrup_lines = [
-        spec.stirrup_centerline(poly, design["bars"], stirrup_key)
-        for poly in design["stirrups"]
-    ]
-    tie_lines = [
-        spec.tie_centerline(a, b, design["bars"], stirrup_key) for a, b in design["ties"]
-    ]
-    for z, n, spacing in runs:
-        for line in stirrup_lines:
-            # Counterclockwise seen from above, so Left hooks turn inward
-            # (also on mirrored instances, whose local frame is flipped).
-            pts = [section.point_m(x, y, z) for x, y in line]
-            pts = _counterclockwise(pts)
-            loop = List[DB.Curve](
-                [DB.Line.CreateBound(pts[k], pts[(k + 1) % len(pts)]) for k in range(len(pts))]
-            )
-            rebar = Rebar.CreateFromCurves(
-                doc, RebarStyle.StirrupTie, stirrup_type, hook, hook, column, DB.XYZ.BasisZ,
-                loop, RebarHookOrientation.Left, RebarHookOrientation.Left, True, True,
-            )
-            _set(doc, rebar, n, spacing)
-            _tag(rebar, column)
-            created.append((rebar, stirrup_key, True))
-        for a, b in tie_lines:
-            line = DB.Line.CreateBound(section.point_m(a[0], a[1], z), section.point_m(b[0], b[1], z))
-            rebar = Rebar.CreateFromCurves(
-                doc, RebarStyle.StirrupTie, stirrup_type, hook, hook, column, DB.XYZ.BasisZ,
-                List[DB.Curve]([line]), RebarHookOrientation.Left, RebarHookOrientation.Right,
-                True, True,
-            )
-            _set(doc, rebar, n, spacing)
-            _tag(rebar, column)
-            created.append((rebar, stirrup_key, True))
+    z_clear_top = clear_top(doc, column, section)
+    # (kind, family, [loop centerlines], [tie centerlines]) per family
+    groups = {}
+    for poly in design["stirrups"]:
+        kind, family = column_spec.family_of(poly)
+        entry = groups.setdefault(kind, (family, [], []))
+        entry[1].append(spec.stirrup_centerline(poly, design["bars"], family.key))
+    for a, b in design["ties"]:
+        family = column_spec.confinement
+        entry = groups.setdefault(CONFINEMENT, (family, [], []))
+        entry[2].append(spec.tie_centerline(a, b, design["bars"], family.key))
+
+    for kind, (family, loops, ties) in groups.items():
+        stirrup_type = bar_type_for(family.key)
+        hook = hooks.get(family.key)
+        for z, n, spacing in _runs(family, column_spec.joint_spacing_m, section, z_clear_top):
+            for line in loops:
+                # Counterclockwise seen from above, so Left hooks turn
+                # inward (also on mirrored instances, whose frame flips).
+                pts = _counterclockwise([section.point_m(x, y, z) for x, y in line])
+                loop = List[DB.Curve](
+                    [DB.Line.CreateBound(pts[k], pts[(k + 1) % len(pts)]) for k in range(len(pts))]
+                )
+                rebar = Rebar.CreateFromCurves(
+                    doc, RebarStyle.StirrupTie, stirrup_type, hook, hook, column, DB.XYZ.BasisZ,
+                    loop, RebarHookOrientation.Left, RebarHookOrientation.Left, True, True,
+                )
+                _set(rebar, n, spacing)
+                _tag(rebar, column)
+                created.append((rebar, family.key, kind))
+            for a, b in ties:
+                line = DB.Line.CreateBound(
+                    section.point_m(a[0], a[1], z), section.point_m(b[0], b[1], z)
+                )
+                rebar = Rebar.CreateFromCurves(
+                    doc, RebarStyle.StirrupTie, stirrup_type, hook, hook, column, DB.XYZ.BasisZ,
+                    List[DB.Curve]([line]), RebarHookOrientation.Left, RebarHookOrientation.Right,
+                    True, True,
+                )
+                _set(rebar, n, spacing)
+                _tag(rebar, column)
+                created.append((rebar, family.key, kind))
     return created
 
 
@@ -459,32 +526,28 @@ def _centerline_points(rebar):
 
 def record_weight(column, created):
     """Steel weight of the bars `generate_column` created (after a
-    Regenerate), written to EA_Peso_Acero_kg. Returns (longitudinal_kg,
-    stirrup_kg, number_of_bars, stirrups_stick_out)."""
-    long_kg = 0.0
-    stirrup_kg = 0.0
+    Regenerate), written to EA_Peso_Acero_kg. Returns ({kind: kg},
+    number_of_bars, stirrups_stick_out)."""
+    kg_by_kind = {LONGITUDINAL: 0.0, EDGE: 0.0, CONFINEMENT: 0.0}
     bars = 0
     stick_out = False
     section = Section(column)
     inverse = section.transform.Inverse
     tol = 0.0015  # m
-    for rebar, key, is_stirrup in created:
-        kg = rebar.TotalLength * FT * spec.bar_weight_kg_per_m(key)
-        if is_stirrup:
-            stirrup_kg += kg
-            if not stick_out:
-                radius = spec.BAR_DIAMETERS_MM[key] / 2000.0
-                for point in _centerline_points(rebar):
-                    p = inverse.OfPoint(point)
-                    local = ((p.X - section.center[0]) * FT, (p.Y - section.center[1]) * FT)
-                    inside = spec.point_in_polygon(local, section.polygon_m)
-                    if not inside or spec.distance_to_polygon(local, section.polygon_m) < radius - tol:
-                        stick_out = True
-                        break
-        else:
-            long_kg += kg
+    for rebar, key, kind in created:
+        kg_by_kind[kind] += rebar.TotalLength * FT * spec.bar_weight_kg_per_m(key)
         bars += rebar.Quantity
+        if kind == LONGITUDINAL or stick_out:
+            continue
+        radius = spec.BAR_DIAMETERS_MM[key] / 2000.0
+        for point in _centerline_points(rebar):
+            p = inverse.OfPoint(point)
+            local = ((p.X - section.center[0]) * FT, (p.Y - section.center[1]) * FT)
+            if (not spec.point_in_polygon(local, section.polygon_m)
+                    or spec.distance_to_polygon(local, section.polygon_m) < radius - tol):
+                stick_out = True
+                break
     p = column.LookupParameter(WEIGHT_PARAM)
     if p is not None and not p.IsReadOnly:
-        p.Set(round(long_kg + stirrup_kg, 2))
-    return long_kg, stirrup_kg, bars, stick_out
+        p.Set(round(sum(kg_by_kind.values()), 2))
+    return kg_by_kind, bars, stick_out
