@@ -39,6 +39,7 @@ from Autodesk.Revit.DB.Structure import (
     RebarHookOrientation,
     RebarHookType,
     RebarHostData,
+    RebarShape,
     RebarStyle,
 )
 from System.Collections.Generic import List
@@ -245,15 +246,16 @@ class BarTypes(object):
         return best[1] if best else None
 
 
-def stirrup_hook(doc, diameter_key):
-    """The 135-degree stirrup hook for a bar diameter: one named for it
-    ('Estribo 3/8" - 135'), else the seismic one (its length scales with
-    the bar diameter), else any 135-degree hook; None if there is none.
-    A hook sized for a bigger bar would cross a small section and stick
-    out of it (a 3/8" hook on a 1/4" tie in a 14 cm columneta)."""
+def stirrup_hook(doc, diameter_key, angle_deg=135.0):
+    """The stirrup hook (135 degrees unless said otherwise) for a bar
+    diameter: one named for it ('Estribo 3/8" - 135'), else the seismic one
+    (its length scales with the bar diameter), else any hook of that angle;
+    None if there is none. A hook sized for a bigger bar would cross a small
+    section and stick out of it (a 3/8" hook on a 1/4" tie in a 14 cm
+    columneta)."""
     ranked = []
     for h in DB.FilteredElementCollector(doc).OfClass(RebarHookType):
-        if abs(h.HookAngle * 57.29578 - 135.0) > 1.0:
+        if abs(h.HookAngle * 57.29578 - angle_deg) > 1.0:
             continue
         name = element_name(h).lower()
         if diameter_key.lower() in name:
@@ -276,10 +278,58 @@ class StirrupHooks(object):
         self.doc = doc
         self.cache = {}
 
-    def get(self, diameter_key):
-        if diameter_key not in self.cache:
-            self.cache[diameter_key] = stirrup_hook(self.doc, diameter_key)
-        return self.cache[diameter_key]
+    def get(self, diameter_key, angle_deg=135.0):
+        key = (diameter_key, round(angle_deg))
+        if key not in self.cache:
+            self.cache[key] = stirrup_hook(self.doc, diameter_key, angle_deg)
+        return self.cache[key]
+
+
+class RebarShapes(object):
+    """The project's rebar shapes by name, for the stirrups and ties drawn
+    with a chosen shape. `mismatched` collects (column id, shape name) where
+    Revit refused the drawing for that shape and picked one itself."""
+
+    def __init__(self, doc):
+        self.by_name = dict(
+            (element_name(s), s) for s in DB.FilteredElementCollector(doc).OfClass(RebarShape)
+        )
+        self.mismatched = []
+
+    def get(self, name):
+        return self.by_name.get(name) if name else None
+
+
+def _hook_angle(shape, end):
+    try:
+        return shape.GetDefaultHookAngle(end)
+    except Exception:
+        return 0
+
+
+def _create_stirrup(doc, shapes, shape_name, column, bar_type, hook, hooks, key, curves,
+                    orient_start, orient_end):
+    """A stirrup or tie with the shape drawn for it (its hooks those the
+    shape asks for); without one, or if Revit refuses the drawing for that
+    shape, the shape Revit matches to the curves (with `hook` at both ends)."""
+    shape = shapes.get(shape_name) if shapes is not None else None
+    if shape is not None:
+        ends = [hooks.get(key, _hook_angle(shape, e)) if _hook_angle(shape, e) else None
+                for e in (0, 1)]
+        try:
+            rebar = Rebar.CreateFromCurvesAndShape(
+                doc, shape, bar_type, ends[0], ends[1], column, DB.XYZ.BasisZ, curves,
+                orient_start, orient_end,
+            )
+        except Exception:
+            rebar = None
+        if rebar is not None:  # None too when the curves don't fit the shape
+            return rebar
+        shapes.mismatched.append((element_id_value(column.Id), shape_name))
+    return Rebar.CreateFromCurves(
+        doc, RebarStyle.StirrupTie, bar_type, hook, hook, column, DB.XYZ.BasisZ,
+        curves, orient_start, orient_end, True, True,
+    )
 
 
 def _solids(geometry):
@@ -425,12 +475,13 @@ def _set(rebar, n, spacing_ft):
         )
 
 
-def generate_column(doc, column, column_spec, bar_types, hooks, mark):
+def generate_column(doc, column, column_spec, bar_types, hooks, mark, shapes=None):
     """Create the column's longitudinal bars, stirrups and ties from its
     drawing (inside an active Transaction; Revit needs a Regenerate before
     their lengths are known, see `record_weight`). Perimeter stirrups use
     the edge ("borde") settings; inner stirrups and ties the confinement
-    ones. Returns [(rebar, diameter_key, kind)]."""
+    ones; each takes the rebar shape it was drawn with (`shapes`, a
+    RebarShapes) when it has one. Returns [(rebar, diameter_key, kind)]."""
     section = Section(column)
     design = column_spec.design
 
@@ -459,31 +510,33 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark):
     z_clear_top = clear_top(doc, column, section)
     # (kind, family, [loop centerlines], [tie centerlines]) per family
     groups = {}
-    for drawn_kind, poly, wrap, is_open in design["stirrups"]:
+    stirrup_shapes = spec.design_shapes(design, "stirrups")
+    for (drawn_kind, poly, wrap, is_open), shape_name in zip(design["stirrups"], stirrup_shapes):
         kind, family = column_spec.family_of(drawn_kind)
         entry = groups.setdefault(kind, (family, [], []))
         line = spec.stirrup_centerline(poly, design["bars"], family.key, wrap, is_open)
-        entry[1].append((spec.clean_polyline(line, closed=not is_open), is_open))
-    for drawn_kind, a, b in design["ties"]:
+        entry[1].append((spec.clean_polyline(line, closed=not is_open), is_open, shape_name))
+    for (drawn_kind, a, b), shape_name in zip(design["ties"], spec.design_shapes(design, "ties")):
         kind, family = column_spec.family_of(drawn_kind)
         entry = groups.setdefault(kind, (family, [], []))
-        entry[2].append(spec.tie_centerline(a, b, design["bars"], family.key))
+        a2, b2 = spec.tie_centerline(a, b, design["bars"], family.key)
+        entry[2].append((a2, b2, shape_name))
 
     for kind, (family, loops, ties) in groups.items():
         stirrup_type = bar_type_for(family.key)
         hook = hooks.get(family.key)
         for z, n, spacing in _runs(family, column_spec.joint_spacing_m, section, z_clear_top):
-            for line, is_open in loops:
+            for line, is_open, shape_name in loops:
                 if is_open:
                     # U-shaped stirrup: its drawn segments, ends left
-                    # straight (no hooks).
+                    # straight (no hooks) unless its shape has them.
                     pts = [section.point_m(x, y, z) for x, y in line]
                     curves = List[DB.Curve](
                         [DB.Line.CreateBound(pts[k], pts[k + 1]) for k in range(len(pts) - 1)]
                     )
-                    rebar = Rebar.CreateFromCurves(
-                        doc, RebarStyle.StirrupTie, stirrup_type, None, None, column, DB.XYZ.BasisZ,
-                        curves, RebarHookOrientation.Left, RebarHookOrientation.Left, True, True,
+                    rebar = _create_stirrup(
+                        doc, shapes, shape_name, column, stirrup_type, None, hooks, family.key,
+                        curves, RebarHookOrientation.Left, RebarHookOrientation.Left,
                     )
                 else:
                     # Counterclockwise seen from above, so Left hooks turn
@@ -492,21 +545,20 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark):
                     loop = List[DB.Curve](
                         [DB.Line.CreateBound(pts[k], pts[(k + 1) % len(pts)]) for k in range(len(pts))]
                     )
-                    rebar = Rebar.CreateFromCurves(
-                        doc, RebarStyle.StirrupTie, stirrup_type, hook, hook, column, DB.XYZ.BasisZ,
-                        loop, RebarHookOrientation.Left, RebarHookOrientation.Left, True, True,
+                    rebar = _create_stirrup(
+                        doc, shapes, shape_name, column, stirrup_type, hook, hooks, family.key,
+                        loop, RebarHookOrientation.Left, RebarHookOrientation.Left,
                     )
                 _set(rebar, n, spacing)
                 _tag(rebar, column)
                 created.append((rebar, family.key, kind))
-            for a, b in ties:
+            for a, b, shape_name in ties:
                 line = DB.Line.CreateBound(
                     section.point_m(a[0], a[1], z), section.point_m(b[0], b[1], z)
                 )
-                rebar = Rebar.CreateFromCurves(
-                    doc, RebarStyle.StirrupTie, stirrup_type, hook, hook, column, DB.XYZ.BasisZ,
+                rebar = _create_stirrup(
+                    doc, shapes, shape_name, column, stirrup_type, hook, hooks, family.key,
                     List[DB.Curve]([line]), RebarHookOrientation.Left, RebarHookOrientation.Right,
-                    True, True,
                 )
                 _set(rebar, n, spacing)
                 _tag(rebar, column)

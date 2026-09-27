@@ -137,6 +137,26 @@ class TestDrawing:
         with pytest.raises(SpecError):
             design_from_text("{no es json")
 
+    def test_shapes_follow_their_stirrups_and_ties(self):
+        from revit_mcp.rebar_spec import (
+            add_item, design_from_text, design_shapes, design_to_text, empty_design, remove_item)
+
+        design = empty_design()
+        square = [(0, 0), (0.1, 0), (0.1, 0.1), (0, 0.1)]
+        add_item(design, "stirrups", ("borde", square, 0.008, False), "M_T1")
+        add_item(design, "stirrups", ("confinamiento", square[:3], 0.0, True))
+        add_item(design, "stirrups", ("confinamiento", square, 0.0, False), "M_T1")
+        add_item(design, "ties", ("confinamiento", (0, 0), (0.1, 0)), "M_02")
+        remove_item(design, "stirrups", 0)
+        assert design_shapes(design, "stirrups") == [None, "M_T1"]
+        again = design_from_text(design_to_text(design))
+        assert design_shapes(again, "stirrups") == [None, "M_T1"]
+        assert design_shapes(again, "ties") == ["M_02"]
+        # a design without shapes (older drawings, auto_design) reads as None
+        old = empty_design()
+        old["stirrups"] = [("borde", square, 0.008, False)]
+        assert design_shapes(old, "stirrups") == [None]
+
     def test_joint_positions(self):
         from revit_mcp.rebar_spec import joint_positions
 

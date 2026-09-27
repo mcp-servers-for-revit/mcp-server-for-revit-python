@@ -117,9 +117,13 @@
                     <RadioButton x:Name="rb_shape_closed" GroupName="shape" Content="Cerrado" IsChecked="True"
                                  Margin="0,0,8,0" VerticalAlignment="Center"
                                  ToolTip="Clic en cada barra y clic derecho (o clic en la primera) para cerrarlo."/>
-                    <RadioButton x:Name="rb_shape_open" GroupName="shape" Content="Abierto (U)" Margin="0,0,20,0"
+                    <RadioButton x:Name="rb_shape_open" GroupName="shape" Content="Abierto (U)" Margin="0,0,12,0"
                                  VerticalAlignment="Center"
                                  ToolTip="Clic en cada punto por las barras que abraza y clic derecho para terminarlo sin cerrar (ej. estribo de confinamiento en U)."/>
+                    <TextBlock Text="Forma: " VerticalAlignment="Center"/>
+                    <TextBlock x:Name="txt_active_shape" Text="la que elija Revit" FontWeight="Bold" Margin="0,0,20,0"
+                               VerticalAlignment="Center"
+                               ToolTip="Forma de armadura de los estribos (o grapas) que dibujes. Se elige con un clic en el panel Formas de armadura."/>
                     <!-- Longitudinal bars: pick a diameter, then click in the plan -->
                     <TextBlock Text="Barras: " FontWeight="Bold" VerticalAlignment="Center"
                                ToolTip="Elige el di&#225;metro y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior)."/>
@@ -158,7 +162,7 @@
                     </WrapPanel>
                 </Border>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
-                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barras: elige el di&#225;metro (1/2&quot;, 5/8&quot;, 3/4&quot; o 1&quot;) y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior); Borrar quita una barra. Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
+                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barras: elige el di&#225;metro (1/2&quot;, 5/8&quot;, 3/4&quot; o 1&quot;) y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior); Borrar quita una barra. Los puntos se ajustan a las barras y a 1 cm. Forma: clic en una forma de armadura (panel derecho) y dibuja el estribo; se crea con esa forma. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
                 <!-- Three views: 3D (large, left), elevation and plan (the sketch). Mouse wheel
                      zooms, middle button drag pans, "Ajustar" refits; in 3D a
                      left drag orbits. -->
@@ -230,14 +234,15 @@
                     <CheckBox DockPanel.Dock="Top" x:Name="chk_shape_stirrups" Content="Solo formas de estribo"
                               IsChecked="False" Margin="0,0,0,4" Click="shape_filter_changed"/>
                     <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
-                        <Button Content="Insertar en el boceto" Height="28" FontWeight="Bold" Margin="0,0,0,4"
-                                Click="shape_insert_click"/>
+                        <Button Content="Quitar forma elegida" Height="28" Margin="0,0,0,4"
+                                Click="shape_clear_click"
+                                ToolTip="Los estribos y grapas que dibujes despues toman la forma que Revit elija."/>
                         <Button Content="Cargar forma (.rfa)..." Height="26" Click="shape_load_click"/>
                     </StackPanel>
                     <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
-                               Text="Doble clic en una forma para insertarla en el boceto, ajustada al recubrimiento."/>
+                               Text="Clic en una forma para elegirla y luego dibuja el estribo en la planta: se crea con esa forma en Revit. Una forma recta (con ganchos) se usa para las grapas."/>
                     <ListBox x:Name="list_shapes" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             MouseDoubleClick="shape_insert_click"/>
+                             SelectionChanged="shape_selected"/>
                 </DockPanel>
             </GroupBox>
         </Grid>

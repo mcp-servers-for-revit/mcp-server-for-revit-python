@@ -246,6 +246,10 @@ class AceroWindow(forms.WPFWindow):
         self._filling_columns = False
 
         self._refresh_steel()
+        # The shape clicked in the browser: the stirrups (or, a straight one,
+        # the ties) drawn next are created with it. None: Revit picks.
+        self.active_shape = None
+        self._filling_shapes = False
         self.rebar_shapes = read_rebar_shapes()
         self._fill_shapes()
         for t in types:
@@ -487,7 +491,7 @@ class AceroWindow(forms.WPFWindow):
         if self.selected is None or self.selected >= len(self.design["stirrups"]):
             return
         self._push_undo()
-        del self.design["stirrups"][self.selected]
+        rs.remove_item(self.design, "stirrups", self.selected)
         self.draft = []
         self._select(None)
         self._status(u"Estribo eliminado (Deshacer lo recupera).")
@@ -822,9 +826,11 @@ class AceroWindow(forms.WPFWindow):
         except ValueError:
             return None
 
-    def _status(self, text=u""):
-        """Warning line over the drawing (hidden when empty)."""
+    def _status(self, text=u"", error=True):
+        """Warning line over the drawing (hidden when empty); a hint (not
+        an error) in blue."""
         self.txt_status.Text = text
+        self.txt_status.Foreground = C_REFUSED if error else C_DRAFT
         self.txt_status.Visibility = Visibility.Visible if text else Visibility.Collapsed
 
     def _accept_vertex(self, point, on_bar):
@@ -922,8 +928,10 @@ class AceroWindow(forms.WPFWindow):
             self.panel_measures.Visibility = Visibility.Collapsed
             return
         self.panel_measures.Visibility = Visibility.Visible
-        self.txt_measures_title.Text = u"Estribo {}de {} seleccionado - medidas exteriores (cm):".format(
-            u"abierto " if is_open else u"", u"borde" if kind == rs.KIND_EDGE else u"confinamiento")
+        shape = rs.design_shapes(self.design, "stirrups")[self.selected]
+        self.txt_measures_title.Text = u"Estribo {}de {}{} seleccionado - medidas exteriores (cm):".format(
+            u"abierto " if is_open else u"", u"borde" if kind == rs.KIND_EDGE else u"confinamiento",
+            u" ({})".format(shape) if shape else u"")
         measures = None if is_open else rs.rect_measures(outline, section.polygon_m)
         self._fill_segment_boxes(rs.side_lengths(outline, closed=False) if is_open else [])
         if measures:
@@ -1416,9 +1424,17 @@ class AceroWindow(forms.WPFWindow):
         if self._outside_cover(kind, pts, wrap, is_open):
             self._status(u"Ese estribo se sale del recubrimiento; corrige sus esquinas (Deshacer quita la ultima).")
             return False
+        shape = self.active_shape if self.active_shape and not self.active_shape["tie"] else None
+        if shape and (shape["closed"] == is_open or shape["points"] != len(pts)):
+            self._status(u"La forma {} es un estribo {} de {} {}; el dibujado tiene {}. "
+                         u"Corrigelo o quita la forma elegida.".format(
+                             shape["name"], u"cerrado" if shape["closed"] else u"abierto",
+                             shape["points"], u"esquinas" if shape["closed"] else u"puntos",
+                             len(pts)))
+            return False
         self._status()
         self._push_undo()
-        self.design["stirrups"].append((kind, pts, wrap, is_open))
+        rs.add_item(self.design, "stirrups", (kind, pts, wrap, is_open), shape["name"] if shape else None)
         self.draft = []
         self._select(len(self.design["stirrups"]) - 1)
         return True
@@ -1460,7 +1476,9 @@ class AceroWindow(forms.WPFWindow):
             if set([c, d]) == set([a, b]):
                 return  # already there
         self._push_undo()
-        self.design["ties"].append((self.kind_for["tie"], a, b))
+        shape = self.active_shape
+        rs.add_item(self.design, "ties", (self.kind_for["tie"], a, b),
+                    shape["name"] if shape and shape["tie"] else None)
 
     def _erase(self, frame, p):
         """Remove the bar, tie or stirrup nearest to the click."""
@@ -1484,7 +1502,10 @@ class AceroWindow(forms.WPFWindow):
         if candidates:
             _, kind, i = min(candidates)
             self._push_undo()
-            del self.design[kind][i]
+            if kind == "bars":
+                del self.design[kind][i]
+            else:
+                rs.remove_item(self.design, kind, i)  # with its shape
             self._select(None)
 
     def _seat_bar(self, click_m):
@@ -1518,22 +1539,28 @@ class AceroWindow(forms.WPFWindow):
     def _fill_shapes(self):
         text = (self.txt_shape_filter.Text or u"").strip().lower()
         only_stirrups = bool(self.chk_shape_stirrups.IsChecked)
-        self.list_shapes.Items.Clear()
-        for shape in self.rebar_shapes:
-            if text and text not in shape["name"].lower():
-                continue
-            if only_stirrups and not shape["stirrup"]:
-                continue
-            panel = StackPanel()
-            panel.Children.Add(shape_preview(shape["strokes"]))
-            name = TextBlock()
-            name.Text = shape["name"]
-            name.HorizontalAlignment = HorizontalAlignment.Center
-            panel.Children.Add(name)
-            item = ListBoxItem()
-            item.Content = panel
-            item.Tag = shape
-            self.list_shapes.Items.Add(item)
+        self._filling_shapes = True
+        try:
+            self.list_shapes.Items.Clear()
+            for shape in self.rebar_shapes:
+                if text and text not in shape["name"].lower():
+                    continue
+                if only_stirrups and not shape["stirrup"]:
+                    continue
+                panel = StackPanel()
+                panel.Children.Add(shape_preview(shape["strokes"]))
+                name = TextBlock()
+                name.Text = shape["name"]
+                name.HorizontalAlignment = HorizontalAlignment.Center
+                panel.Children.Add(name)
+                item = ListBoxItem()
+                item.Content = panel
+                item.Tag = shape
+                self.list_shapes.Items.Add(item)
+                if self.active_shape and self.active_shape["name"] == shape["name"]:
+                    self.list_shapes.SelectedItem = item
+        finally:
+            self._filling_shapes = False
 
     def shape_filter_changed(self, sender, args):
         if hasattr(self, "rebar_shapes"):  # also fired while the XAML loads
@@ -1559,39 +1586,58 @@ class AceroWindow(forms.WPFWindow):
         self._fill_shapes()
         self._status(u"Formas cargadas: {} de {}.".format(loaded, len(dialog.FileNames)))
 
-    def shape_insert_click(self, sender, args):
-        """Put the chosen shape in the sketch as a stirrup, filling the space
-        inside the cover."""
+    def shape_selected(self, sender, args):
+        """A click on a shape chooses it for the next stirrups (a straight
+        one, for the ties): nothing is drawn, the stirrup is drawn by hand."""
+        if getattr(self, "_filling_shapes", True):
+            return
         item = self.list_shapes.SelectedItem
         if item is None:
             return
         shape = item.Tag
-        t = self.by_id.get(self.state.active)
-        section = t.section if t else None
-        cover = self._cover_m()
-        if section is None or cover is None:
-            self._status(u"Elige un tipo con seccion valida y un recubrimiento.")
-            return
         try:
             vertices, closed = rs.shape_outline(shape["lines"], shape["hooks"][0], shape["hooks"][1])
-        except rs.SpecError as e:
-            self._status(u"No se puede usar la forma {}: {}".format(shape["name"], e))
-            return
+        except rs.SpecError:
+            vertices, closed = [], False
         if len(vertices) < 2:
-            self._status(u"La forma {} no tiene tramos para un estribo.".format(shape["name"]))
+            self._set_active_shape(None)
+            self._status(u"La forma {} no se puede usar para estribos ni grapas.".format(shape["name"]))
             return
-        kind = self.kind_for["stirrup"]
-        key = self._family_key(kind)
-        box = rs.cover_bounds(section.polygon_m, cover + rs.BAR_DIAMETERS_MM[key] / 1000.0)
-        pts = rs.clean_polyline(rs.fit_polyline_to_box(vertices, box), closed=closed)
-        if self._outside_cover(kind, pts, 0.0, not closed):
-            self._status(u"La forma {} no cabe en esta seccion dentro del recubrimiento.".format(shape["name"]))
-            return
-        self._status()
-        self._push_undo()
-        self.design["stirrups"].append((kind, pts, 0.0, not closed))
+        self._set_active_shape({
+            "name": shape["name"],
+            "closed": closed,
+            "points": len(vertices),
+            "tie": not closed and len(vertices) == 2,
+        })
+
+    def shape_clear_click(self, sender, args):
+        self._set_active_shape(None)
+
+    def _set_active_shape(self, shape):
+        """Make `shape` the one new stirrups/ties take and set the sketch
+        up for it: a closed or open (U) stirrup, or the Grapa tool."""
+        self.active_shape = shape
         self.draft = []
-        self._select(len(self.design["stirrups"]) - 1)
+        if shape is None:
+            self._filling_shapes = True
+            self.list_shapes.SelectedItem = None
+            self._filling_shapes = False
+            self.txt_active_shape.Text = u"la que elija Revit"
+            self.rb_shape_closed.IsEnabled = self.rb_shape_open.IsEnabled = True
+            self._status()
+        else:
+            self.txt_active_shape.Text = shape["name"]
+            if shape["tie"]:
+                self.rb_tie.IsChecked = True
+                how = u"haz clic entre dos barras enfrentadas para la grapa"
+            else:
+                (self.rb_shape_closed if shape["closed"] else self.rb_shape_open).IsChecked = True
+                self.rb_shape_closed.IsEnabled = self.rb_shape_open.IsEnabled = False
+                if not shape["closed"] or not self.rb_rect.IsChecked:
+                    self.rb_stirrup.IsChecked = True
+                how = (u"dibuja el estribo en la planta ({} {})".format(
+                    shape["points"], u"esquinas" if shape["closed"] else u"puntos, clic derecho para terminar"))
+            self._status(u"Forma {}: {}.".format(shape["name"], how), error=False)
         self.redraw()
 
     def clear_click(self, sender, args):
@@ -1679,6 +1725,7 @@ dry_run = mode.startswith("Vista previa")
 
 bar_types = rc.BarTypes(doc)
 hooks = rc.StirrupHooks(doc)
+rebar_shapes = rc.RebarShapes(doc)
 warnings = [u"{}: sin generar - {}".format(by_id[t].name, e) for t, e in spec_errors.items()]
 stick_out = {}  # type name -> columns where a stirrup/tie hook leaves the section
 KINDS = (rc.LONGITUDINAL, rc.EDGE, rc.CONFINEMENT)
@@ -1697,7 +1744,7 @@ try:
             sub.Start()
             try:
                 created = rc.generate_column(
-                    doc, column, specs[ct.id], bar_types, hooks, rc.type_mark(ct.name)
+                    doc, column, specs[ct.id], bar_types, hooks, rc.type_mark(ct.name), rebar_shapes
                 )
                 sub.Commit()
                 done.append((column, ct.name, created))
@@ -1760,6 +1807,14 @@ for type_name in sorted(stick_out):
     warnings.append(
         u"{}: en {} columna(s) el gancho de algun estribo o grapa sobresale de la seccion; "
         u"conviene un gancho mas corto para ese diametro.".format(type_name, stick_out[type_name])
+    )
+mismatched = {}  # shape name -> columns where Revit refused it
+for column_id, shape_name in rebar_shapes.mismatched:
+    mismatched.setdefault(shape_name, set()).add(column_id)
+for shape_name in sorted(mismatched):
+    warnings.append(
+        u"Forma {}: el estribo dibujado no coincide con ella en {} columna(s); "
+        u"Revit uso la forma que corresponde al dibujo.".format(shape_name, len(mismatched[shape_name]))
     )
 if warnings:
     output.print_md("\n### Advertencias ({})".format(len(warnings)))

@@ -261,9 +261,37 @@ def empty_design():
     return {"v": DESIGN_VERSION, "bars": [], "stirrups": [], "ties": []}
 
 
+def design_shapes(design, key):
+    """Rebar shape name of each of the design's "stirrups" or "ties" (key),
+    in the same order; None where Revit picks the shape itself."""
+    shapes = design.setdefault("shapes", {}).setdefault(key, [])
+    count = len(design.get(key, []))
+    shapes.extend([None] * (count - len(shapes)))
+    del shapes[count:]
+    return shapes
+
+
+def add_item(design, key, item, shape=None):
+    """Append a stirrup or tie (key "stirrups" / "ties") with its shape."""
+    shapes = design_shapes(design, key)
+    design[key].append(item)
+    shapes.append(shape)
+
+
+def remove_item(design, key, index):
+    """Delete one stirrup or tie together with its shape."""
+    shapes = design_shapes(design, key)
+    del design[key][index]
+    del shapes[index]
+
+
 def design_to_text(design):
     def r(v):
         return round(v, 4)
+
+    def shape(key, i):
+        name = design_shapes(design, key)[i]
+        return [("f", name)] if name else []
 
     data = {
         "v": DESIGN_VERSION,
@@ -273,12 +301,13 @@ def design_to_text(design):
                 [("k", kind), ("p", [[r(x), r(y)] for x, y in poly])]
                 + ([("r", r(wrap))] if wrap is not None else [])
                 + ([("o", 1)] if is_open else [])
+                + shape("stirrups", i)
             )
-            for kind, poly, wrap, is_open in design.get("stirrups", [])
+            for i, (kind, poly, wrap, is_open) in enumerate(design.get("stirrups", []))
         ],
         "ties": [
-            {"k": kind, "p": [[r(a[0]), r(a[1])], [r(b[0]), r(b[1])]]}
-            for kind, a, b in design.get("ties", [])
+            dict([("k", kind), ("p", [[r(a[0]), r(a[1])], [r(b[0]), r(b[1])]])] + shape("ties", i))
+            for i, (kind, a, b) in enumerate(design.get("ties", []))
         ],
     }
     if not (data["bars"] or data["stirrups"] or data["ties"]):
@@ -314,13 +343,15 @@ def design_from_text(text):
             kind, points = _kind_and_points(entry, None)
             wrap = entry.get("r") if isinstance(entry, dict) else None
             is_open = bool(entry.get("o")) if isinstance(entry, dict) else False
+            shape = entry.get("f") if isinstance(entry, dict) else None
             if len(points) >= (2 if is_open else 3):
-                design["stirrups"].append(
-                    (kind, points, None if wrap is None else float(wrap), is_open))
+                add_item(design, "stirrups",
+                         (kind, points, None if wrap is None else float(wrap), is_open), shape)
         for entry in data.get("ties", []):
             kind, points = _kind_and_points(entry, KIND_CONFINEMENT)
+            shape = entry.get("f") if isinstance(entry, dict) else None
             if len(points) == 2:
-                design["ties"].append((kind, points[0], points[1]))
+                add_item(design, "ties", (kind, points[0], points[1]), shape)
         # Stirrups of the first format: perimeter ones are edge stirrups.
         design["stirrups"] = [
             (kind or (KIND_EDGE if is_edge_stirrup(poly, design["bars"]) else KIND_CONFINEMENT),
