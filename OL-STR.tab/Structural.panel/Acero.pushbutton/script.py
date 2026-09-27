@@ -4,7 +4,7 @@ columnas de concreto. La configuracion (longitudinal, estribos, nucleo y
 el dibujo de la seccion con estribos, grapas y barras a mano) se guarda
 en cada tipo de columna."""
 
-__title__ = "Acero en\nColumna"
+__title__ = "Acero\nColumna"
 __author__ = "Revit MCP"
 
 import io
