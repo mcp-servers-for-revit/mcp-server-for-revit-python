@@ -226,7 +226,14 @@ def draw_elevation(canvas, data, frame):
         _rect(canvas, frame, -half, clear, half, height, C_JOINT, C_BAR)
         if not neighbors:
             _text(canvas, frame, 0.0, height + 0.06, u"VIGA / NUDO", bold=True)
+    # one name per kind (VIGA, LOSA, ZAPATA), on its biggest piece
+    biggest = {}
     for n in neighbors:
+        x0, _, z0, x1, _, z1 = n["box"]
+        area = (x1 - x0) * (z1 - z0)
+        if n["label"] not in biggest or area > biggest[n["label"]][0]:
+            biggest[n["label"]] = (area, n)
+    for _, n in biggest.values():
         x0, _, z0, x1, _, z1 = n["box"]
         # name beside the column, on the side the element reaches furthest
         side = x1 * widen if abs(x1) >= abs(x0) else x0 * widen
@@ -260,9 +267,11 @@ def draw_elevation(canvas, data, frame):
     for offset in data.get("joint", []):
         _line(canvas, frame, (-half + 0.01, clear + offset), (half - 0.01, clear + offset), C_EDGE, 2)
 
-    _text(canvas, frame, 0.0, -0.045, u"Luz libre {:.2f} m".format(clear), brush=C_DIM, size=10)
+    # below everything (a footing under the base included)
+    floor = min([0.0] + [n["box"][2] for n in neighbors])
+    _text(canvas, frame, 0.0, floor - 0.045, u"Luz libre {:.2f} m".format(clear), brush=C_DIM, size=10)
     if data.get("message"):
-        _text(canvas, frame, 0.0, -0.13, data["message"], brush=_brush(192, 57, 43), size=10)
+        _text(canvas, frame, 0.0, floor - 0.13, data["message"], brush=_brush(192, 57, 43), size=10)
 
 
 # --- 3D -----------------------------------------------------------------------

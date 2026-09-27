@@ -567,18 +567,17 @@ def record_weight(column, created):
 
 # --- Elements around the column, for the elevation and 3D views ---------------
 
+# Only what frames into the column: beams, slabs and its footing.
 NEIGHBOR_CATEGORIES = (
     (DB.BuiltInCategory.OST_StructuralFraming, u"VIGA"),
     (DB.BuiltInCategory.OST_Floors, u"LOSA"),
     (DB.BuiltInCategory.OST_StructuralFoundation, u"ZAPATA"),
-    (DB.BuiltInCategory.OST_Walls, u"MURO"),
-    (DB.BuiltInCategory.OST_StructuralColumns, u"COLUMNA"),
 )
 
 
 def column_neighbors(doc, column, section, reach_m=0.6, contact_m=0.02):
-    """Elements touching the column (within `contact_m`) - beams, slabs,
-    footings, walls, the columns above/below - cut to `reach_m` around it,
+    """Elements touching the column (within `contact_m`) - beams, slabs
+    and its footing - cut to `reach_m` around it,
     in the column's local frame (meters; x/y from the section center, z
     from the column base). Returns [{"label", "triangles": [(p, p, p)],
     "box": (x0, y0, z0, x1, y1, z1)}]."""
