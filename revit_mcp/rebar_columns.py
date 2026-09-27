@@ -17,7 +17,8 @@ in the column type's parameters:
 
 The drawing is used as drawn (any section shape: rectangle, trapezoid,
 L, T...). Each drawn stirrup/crosstie carries the family chosen when it
-was sketched: edge ("borde") or confinement.
+was sketched: edge ("borde") or confinement. A stirrup can also be open
+(U-shaped, ends not joined, no hooks), as confinement stirrups often are.
 
 Longitudinal bars run the column's full height (level to level; laps and
 anchorages are not modeled). Stirrups and ties are laid out from both ends
@@ -458,10 +459,11 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark):
     z_clear_top = clear_top(doc, column, section)
     # (kind, family, [loop centerlines], [tie centerlines]) per family
     groups = {}
-    for drawn_kind, poly, wrap in design["stirrups"]:
+    for drawn_kind, poly, wrap, is_open in design["stirrups"]:
         kind, family = column_spec.family_of(drawn_kind)
         entry = groups.setdefault(kind, (family, [], []))
-        entry[1].append(spec.stirrup_centerline(poly, design["bars"], family.key, wrap))
+        line = spec.stirrup_centerline(poly, design["bars"], family.key, wrap, is_open)
+        entry[1].append((spec.clean_polyline(line, closed=not is_open), is_open))
     for drawn_kind, a, b in design["ties"]:
         kind, family = column_spec.family_of(drawn_kind)
         entry = groups.setdefault(kind, (family, [], []))
@@ -471,17 +473,29 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark):
         stirrup_type = bar_type_for(family.key)
         hook = hooks.get(family.key)
         for z, n, spacing in _runs(family, column_spec.joint_spacing_m, section, z_clear_top):
-            for line in loops:
-                # Counterclockwise seen from above, so Left hooks turn
-                # inward (also on mirrored instances, whose frame flips).
-                pts = _counterclockwise([section.point_m(x, y, z) for x, y in line])
-                loop = List[DB.Curve](
-                    [DB.Line.CreateBound(pts[k], pts[(k + 1) % len(pts)]) for k in range(len(pts))]
-                )
-                rebar = Rebar.CreateFromCurves(
-                    doc, RebarStyle.StirrupTie, stirrup_type, hook, hook, column, DB.XYZ.BasisZ,
-                    loop, RebarHookOrientation.Left, RebarHookOrientation.Left, True, True,
-                )
+            for line, is_open in loops:
+                if is_open:
+                    # U-shaped stirrup: its drawn segments, ends left
+                    # straight (no hooks).
+                    pts = [section.point_m(x, y, z) for x, y in line]
+                    curves = List[DB.Curve](
+                        [DB.Line.CreateBound(pts[k], pts[k + 1]) for k in range(len(pts) - 1)]
+                    )
+                    rebar = Rebar.CreateFromCurves(
+                        doc, RebarStyle.StirrupTie, stirrup_type, None, None, column, DB.XYZ.BasisZ,
+                        curves, RebarHookOrientation.Left, RebarHookOrientation.Left, True, True,
+                    )
+                else:
+                    # Counterclockwise seen from above, so Left hooks turn
+                    # inward (also on mirrored instances, whose frame flips).
+                    pts = _counterclockwise([section.point_m(x, y, z) for x, y in line])
+                    loop = List[DB.Curve](
+                        [DB.Line.CreateBound(pts[k], pts[(k + 1) % len(pts)]) for k in range(len(pts))]
+                    )
+                    rebar = Rebar.CreateFromCurves(
+                        doc, RebarStyle.StirrupTie, stirrup_type, hook, hook, column, DB.XYZ.BasisZ,
+                        loop, RebarHookOrientation.Left, RebarHookOrientation.Left, True, True,
+                    )
                 _set(rebar, n, spacing)
                 _tag(rebar, column)
                 created.append((rebar, family.key, kind))

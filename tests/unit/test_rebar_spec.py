@@ -97,8 +97,8 @@ class TestDrawing:
         from revit_mcp.rebar_spec import auto_design, stirrup_centerline
 
         design = auto_design(0.30, 0.60, 0.04, '3/8"', parse_longitudinal("8 5/8"))
-        kind, poly, wrap = design["stirrups"][0]
-        assert kind == "borde"
+        kind, poly, wrap, is_open = design["stirrups"][0]
+        assert kind == "borde" and not is_open
         line = stirrup_centerline(poly, design["bars"], '3/8"', wrap)
         xs = [x for x, _ in line]
         # stirrup centerline sits cover + half the stirrup inside the face
@@ -124,12 +124,13 @@ class TestDrawing:
 
         design = empty_design()
         design["bars"] = [(0.1, -0.2, '3/4"')]
-        design["stirrups"] = [("confinamiento", [(0, 0), (0.1, 0), (0.1, 0.1)], 0.008)]
+        design["stirrups"] = [("confinamiento", [(0, 0), (0.1, 0), (0.1, 0.1)], 0.008, True)]
         design["ties"] = [("borde", (0, 0), (0.1, 0.1))]
         again = design_from_text(design_to_text(design))
         assert again["bars"] == [(0.1, -0.2, '3/4"')]
         assert again["stirrups"][0][0] == "confinamiento"
         assert again["stirrups"][0][2] == pytest.approx(0.008)
+        assert again["stirrups"][0][3] is True
         assert again["ties"][0][0] == "borde"
         assert design_to_text(empty_design()) == ""
         assert design_from_text("") is None
@@ -196,7 +197,7 @@ class TestMeasures:
         from revit_mcp.rebar_spec import auto_design, rect_measures, stirrup_outline
 
         design = auto_design(0.30, 0.80, 0.04, '3/8"', parse_longitudinal("8 5/8"))
-        kind, poly, wrap = design["stirrups"][0]
+        kind, poly, wrap, _ = design["stirrups"][0]
         width, height, left, bottom = rect_measures(
             stirrup_outline(poly, design["bars"], '3/8"', wrap), self.section)
         assert (width, height) == (pytest.approx(0.22), pytest.approx(0.72))
@@ -281,3 +282,43 @@ class TestCoverLimit:
         outside = [(-0.13, -0.35), (0.10, -0.35), (0.10, 0.35), (-0.13, 0.35)]
         assert stirrup_inside_cover(inside, [], '3/8"', 0.0, self.section, 0.04)
         assert not stirrup_inside_cover(outside, [], '3/8"', 0.0, self.section, 0.04)
+
+
+class TestOpenStirrup:
+    # U drawn through three bars' centers, open to the left (like a bracket)
+    u = [(-0.10, 0.30), (0.10, 0.30), (0.10, -0.30), (-0.10, -0.30)]
+
+    def test_offset_goes_away_from_the_inside(self):
+        from revit_mcp.rebar_spec import offset_polyline_outward
+
+        out = offset_polyline_outward(self.u, 0.01)
+        assert out[0] == pytest.approx((-0.10, 0.31))      # top leg moved up
+        assert out[1] == pytest.approx((0.11, 0.31))       # corner mitered out
+        assert out[2] == pytest.approx((0.11, -0.31))
+        assert out[3] == pytest.approx((-0.10, -0.31))     # bottom leg moved down
+
+    def test_open_stirrup_roundtrip_and_measures(self):
+        from revit_mcp.rebar_spec import design_from_text, design_to_text, empty_design, side_lengths, stirrup_outline
+
+        design = empty_design()
+        design["stirrups"] = [("confinamiento", self.u, 0.0, True)]
+        again = design_from_text(design_to_text(design))
+        kind, poly, wrap, is_open = again["stirrups"][0]
+        assert is_open
+        sides = side_lengths(stirrup_outline(poly, [], '3/8"', wrap, is_open), closed=False)
+        assert len(sides) == 3
+
+    def test_needs_two_points(self):
+        from revit_mcp.rebar_spec import offset_polyline_outward
+
+        with pytest.raises(SpecError):
+            offset_polyline_outward([(0, 0)], 0.01)
+
+
+def test_clean_polyline():
+    from revit_mcp.rebar_spec import clean_polyline
+
+    straight = [(0, 0), (0, 0.1), (0, 0.1), (0, 0.2), (0.1, 0.2)]
+    assert clean_polyline(straight, closed=False) == [(0, 0), (0, 0.2), (0.1, 0.2)]
+    square = [(0, 0), (0.05, 0), (0.1, 0), (0.1, 0.1), (0, 0.1), (0, 0)]
+    assert clean_polyline(square, closed=True) == [(0, 0), (0.1, 0), (0.1, 0.1), (0, 0.1)]

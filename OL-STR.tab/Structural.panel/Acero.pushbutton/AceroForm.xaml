@@ -3,7 +3,8 @@
         Title="Acero - Columnas"
         Height="760" Width="1080" MinWidth="820" MinHeight="560"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="CanResizeWithGrip">
+        ResizeMode="CanResizeWithGrip"
+        PreviewKeyDown="window_key">
     <DockPanel Margin="12">
         <!-- Bottom: scope + run -->
         <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
@@ -127,6 +128,13 @@
                     <Button Content="Limpiar" Width="65" Click="clear_click"/>
                 </WrapPanel>
                 <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <TextBlock Text="Estribo: " VerticalAlignment="Center"/>
+                    <RadioButton x:Name="rb_shape_closed" GroupName="shape" Content="Cerrado" IsChecked="True"
+                                 Margin="0,0,8,0" VerticalAlignment="Center"
+                                 ToolTip="Clic en cada barra y clic derecho (o clic en la primera) para cerrarlo."/>
+                    <RadioButton x:Name="rb_shape_open" GroupName="shape" Content="Abierto (U)" Margin="0,0,20,0"
+                                 VerticalAlignment="Center"
+                                 ToolTip="Clic en cada punto por las barras que abraza y clic derecho para terminarlo sin cerrar (ej. estribo de confinamiento en U)."/>
                     <TextBlock Text="Barras longitudinales: " VerticalAlignment="Center"/>
                     <TextBox x:Name="txt_auto_long" Width="130" Margin="0,0,4,0" VerticalAlignment="Center"
                              ToolTip="Ej. 8&#216;5/8&quot;  o  4&#216;3/4&quot; + 4&#216;5/8&quot;"/>
@@ -153,7 +161,7 @@
                     </WrapPanel>
                 </Border>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
-                           Text="Estribo: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barra: clic donde va. Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
+                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barra: clic donde va. Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
                 <Border BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White" ClipToBounds="True">
                     <Canvas x:Name="canvas" Background="White"
                             MouseLeftButtonDown="canvas_left" MouseRightButtonDown="canvas_right"

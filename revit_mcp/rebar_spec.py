@@ -272,8 +272,9 @@ def design_to_text(design):
             dict(
                 [("k", kind), ("p", [[r(x), r(y)] for x, y in poly])]
                 + ([("r", r(wrap))] if wrap is not None else [])
+                + ([("o", 1)] if is_open else [])
             )
-            for kind, poly, wrap in design.get("stirrups", [])
+            for kind, poly, wrap, is_open in design.get("stirrups", [])
         ],
         "ties": [
             {"k": kind, "p": [[r(a[0]), r(a[1])], [r(b[0]), r(b[1])]]}
@@ -312,8 +313,10 @@ def design_from_text(text):
         for entry in data.get("stirrups", []):
             kind, points = _kind_and_points(entry, None)
             wrap = entry.get("r") if isinstance(entry, dict) else None
-            if len(points) >= 3:
-                design["stirrups"].append((kind, points, None if wrap is None else float(wrap)))
+            is_open = bool(entry.get("o")) if isinstance(entry, dict) else False
+            if len(points) >= (2 if is_open else 3):
+                design["stirrups"].append(
+                    (kind, points, None if wrap is None else float(wrap), is_open))
         for entry in data.get("ties", []):
             kind, points = _kind_and_points(entry, KIND_CONFINEMENT)
             if len(points) == 2:
@@ -321,8 +324,8 @@ def design_from_text(text):
         # Stirrups of the first format: perimeter ones are edge stirrups.
         design["stirrups"] = [
             (kind or (KIND_EDGE if is_edge_stirrup(poly, design["bars"]) else KIND_CONFINEMENT),
-             poly, wrap)
-            for kind, poly, wrap in design["stirrups"]
+             poly, wrap, is_open)
+            for kind, poly, wrap, is_open in design["stirrups"]
         ]
         return design
     except (ValueError, TypeError, KeyError, AttributeError):
@@ -418,29 +421,75 @@ def wrap_radius(vertices, bars):
     return max(radii) if radii else 0.0
 
 
-def stirrup_centerline(vertices, bars, stirrup_key, wrap=None):
+def offset_polyline_outward(points, distance):
+    """Offset of an open polyline (an open, U-shaped stirrup) away from the
+    bars it wraps: the side opposite to its inside, taken as the polygon
+    it would make if closed. Inner corners are mitered; the two ends move
+    square to their own segment."""
+    pts = list(points)
+    n = len(pts)
+    if n < 2:
+        raise SpecError(u"El estribo abierto necesita al menos 2 puntos")
+    sign = 1.0 if n < 3 or polygon_signed_area(pts) > 0 else -1.0
+    normals = []
+    for k in range(n - 1):
+        dx, dy = pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            raise SpecError(u"El estribo tiene dos puntos repetidos")
+        normals.append((sign * dy / length, -sign * dx / length))
+    out = []
+    for k in range(n):
+        if k == 0 or k == n - 1:
+            nx, ny = normals[0] if k == 0 else normals[-1]
+            out.append((pts[k][0] + nx * distance, pts[k][1] + ny * distance))
+            continue
+        (ax, ay), (bx, by) = normals[k - 1], normals[k]
+        mx, my = ax + bx, ay + by
+        dot = mx * ax + my * ay
+        if abs(dot) < 1e-9:  # a U-turn: just push along the first normal
+            mx, my, dot = ax, ay, 1.0
+        scale = distance / dot
+        out.append((pts[k][0] + mx * scale, pts[k][1] + my * scale))
+    return out
+
+
+def stirrup_centerline(vertices, bars, stirrup_key, wrap=None, is_open=False):
     """Centerline of a stirrup drawn through bar centers: pushed outward
     by the wrapped bar radius (`wrap`, stored with the stirrup so editing
     its measures can't change it; computed from the bars when None) plus
-    half the stirrup diameter."""
+    half the stirrup diameter. `is_open`: a U-shaped stirrup whose ends
+    are not joined."""
     ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
     if wrap is None:
         wrap = wrap_radius(vertices, bars)
-    return offset_polygon_outward(vertices, wrap + ds / 2.0)
+    offset = offset_polyline_outward if is_open else offset_polygon_outward
+    return offset(vertices, wrap + ds / 2.0)
 
 
-def stirrup_outline(vertices, bars, stirrup_key, wrap=None):
+def stirrup_outline(vertices, bars, stirrup_key, wrap=None, is_open=False):
     """Outer face of the stirrup (its measured size)."""
     ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
     if wrap is None:
         wrap = wrap_radius(vertices, bars)
-    return offset_polygon_outward(vertices, wrap + ds)
+    offset = offset_polyline_outward if is_open else offset_polygon_outward
+    return offset(vertices, wrap + ds)
 
 
-def side_lengths(polygon):
+def side_lengths(polygon, closed=True):
     n = len(polygon)
+    count = n if closed else n - 1
     return [math.hypot(polygon[(k + 1) % n][0] - polygon[k][0], polygon[(k + 1) % n][1] - polygon[k][1])
-            for k in range(n)]
+            for k in range(count)]
+
+
+def distance_to_polyline(point, points):
+    """Distance from a point to an open polyline."""
+    best = None
+    for k in range(len(points) - 1):
+        d = distance_to_polygon(point, [points[k], points[k + 1]])
+        best = d if best is None else min(best, d)
+    return best if best is not None else float("inf")
 
 
 def rect_measures(outline, section_polygon, tol=1e-4):
@@ -495,7 +544,7 @@ def auto_design(b, h, cover, stirrup_key, groups):
     design = empty_design()
     design["bars"] = [(x, y, k) for x, y, k in bars]
     corners = [(x, y) for x, y, _ in bars[:4]]
-    design["stirrups"] = [(KIND_EDGE, corners, wrap_radius(corners, design["bars"]))]
+    design["stirrups"] = [(KIND_EDGE, corners, wrap_radius(corners, design["bars"]), False)]
     return design
 
 
@@ -633,10 +682,37 @@ def fit_vertex(point, section_polygon, cover, stirrup_key, bar_radius=0.0,
     return None
 
 
-def stirrup_inside_cover(vertices, bars, stirrup_key, wrap, section_polygon, cover, tol=1e-3):
+def stirrup_inside_cover(vertices, bars, stirrup_key, wrap, section_polygon, cover, tol=1e-3,
+                         is_open=False):
     """Does the stirrup's outer face stay within the cover?"""
     zone = offset_polygon_outward(section_polygon, -cover)
-    for p in stirrup_outline(vertices, bars, stirrup_key, wrap):
+    for p in stirrup_outline(vertices, bars, stirrup_key, wrap, is_open):
         if not (point_in_polygon(p, zone) or distance_to_polygon(p, zone) <= tol):
             return False
     return True
+
+
+FREE_CORNER_SNAP = 0.01  # Estribo tool: free corners snap to the cover only this close
+
+
+def clean_polyline(points, closed, tol=1e-4):
+    """Drop repeated points and corners lying on a straight line (Revit
+    can't build a stirrup from collinear consecutive segments)."""
+    pts = []
+    for p in points:
+        if not pts or math.hypot(p[0] - pts[-1][0], p[1] - pts[-1][1]) > tol:
+            pts.append(p)
+    if closed and len(pts) > 1 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= tol:
+        pts.pop()
+    changed = True
+    while changed and len(pts) > (3 if closed else 2):
+        changed = False
+        n = len(pts)
+        for k in range(n) if closed else range(1, n - 1):
+            a, b, c = pts[k - 1], pts[k], pts[(k + 1) % n]
+            cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+            if abs(cross) <= tol * tol:
+                del pts[k]
+                changed = True
+                break
+    return pts
