@@ -244,6 +244,7 @@ class AceroWindow(forms.WPFWindow):
         self._views_sig = None
         self._elev_data = None
         self._clear_cache = {}
+        self._neighbor_cache = {}  # type id -> elements touching its column
         self.levels = sorted(
             DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements(),
             key=lambda lv: lv.ProjectElevation,
@@ -1117,6 +1118,12 @@ class AceroWindow(forms.WPFWindow):
                 top = section.z_top
             self._clear_cache[t.id] = (top - section.z_bottom) * rc.FT
         clear = self._clear_cache[t.id]
+        if t.id not in self._neighbor_cache:
+            try:
+                self._neighbor_cache[t.id] = rc.column_neighbors(doc, t.columns[0], section)
+            except Exception:
+                self._neighbor_cache[t.id] = []
+        neighbors = self._neighbor_cache[t.id]
         f = self._get_form()
         edge, edge_msg = self._family_view(f["edge"], f["edge_dist"], clear)
         conf, conf_msg = self._family_view(f["conf"], f["conf_dist"], clear)
@@ -1144,6 +1151,7 @@ class AceroWindow(forms.WPFWindow):
             "conf": conf,
             "joint": joint,
             "message": message,
+            "neighbors": neighbors,
         }
         loops = []
         families = {rs.KIND_EDGE: edge, rs.KIND_CONFINEMENT: conf}
@@ -1172,6 +1180,7 @@ class AceroWindow(forms.WPFWindow):
             "height": height,
             "bars": [(x, y, rs.BAR_DIAMETERS_MM[k] / 2000.0) for x, y, k in bars],
             "loops": loops,
+            "neighbors": neighbors,
         }
         return elev, scene
 

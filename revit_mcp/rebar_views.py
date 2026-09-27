@@ -51,6 +51,9 @@ C_CONF = _brush(40, 150, 90)
 C_BAR = _brush(40, 40, 40)
 C_CONCRETE = _brush(225, 228, 232)
 C_JOINT = _brush(200, 204, 210)
+C_NEIGHBOR = _brush(236, 238, 241)
+C_NEIGHBOR_EDGE = _brush(150, 155, 162)
+C_NEIGHBOR_TEXT = _brush(90, 95, 105)
 C_TEXT = _brush(40, 40, 40)
 C_DIM = _brush(40, 110, 220)
 
@@ -192,7 +195,10 @@ def _widen(data):
 
 def elevation_extent(data):
     half = data["width"] * _widen(data) / 2.0
-    return -half - 0.20, -0.17, half + 0.30, data["height"] + 0.14
+    zs = [z for n in data.get("neighbors", []) for z in (n["box"][2], n["box"][5])]
+    bottom = min([-0.17] + [z - 0.17 for z in zs])
+    top = max([data["height"] + 0.14] + [z + 0.08 for z in zs])
+    return -half - 0.20, bottom, half + 0.30, top
 
 
 def draw_elevation(canvas, data, frame):
@@ -209,10 +215,25 @@ def draw_elevation(canvas, data, frame):
     widen = _widen(data)
     width, height, clear = data["width"] * widen, data["height"], data["clear"]
     half = width / 2.0
+    neighbors = data.get("neighbors", [])
+    # The elements touching the column, behind it (x widened like the
+    # column), each with its name; the column is drawn over them.
+    for n in neighbors:
+        x0, _, z0, x1, _, z1 = n["box"]
+        _rect(canvas, frame, x0 * widen, z0, x1 * widen, z1, C_NEIGHBOR, C_NEIGHBOR_EDGE)
     _rect(canvas, frame, -half, 0.0, half, clear, C_CONCRETE, C_BAR)
     if height - clear > 1e-3:
-        _rect(canvas, frame, -half - 0.10, clear, half + 0.10, height, C_JOINT, C_BAR)
-        _text(canvas, frame, 0.0, height + 0.06, u"VIGA / NUDO", bold=True)
+        _rect(canvas, frame, -half, clear, half, height, C_JOINT, C_BAR)
+        if not neighbors:
+            _text(canvas, frame, 0.0, height + 0.06, u"VIGA / NUDO", bold=True)
+    for n in neighbors:
+        x0, _, z0, x1, _, z1 = n["box"]
+        # name beside the column, on the side the element reaches furthest
+        side = x1 * widen if abs(x1) >= abs(x0) else x0 * widen
+        x = (side + (half if side > 0 else -half)) / 2.0
+        if abs(side) <= half + 1e-6:
+            x = 0.0
+        _text(canvas, frame, x, (z0 + z1) / 2.0, n["label"], brush=C_NEIGHBOR_TEXT, size=10, bold=True)
     for x in data["bars_x"]:
         _line(canvas, frame, (x * widen, 0.0), (x * widen, height), C_BAR, 2)
 
@@ -418,6 +439,21 @@ class Scene3D(object):
         for kind, mesh in meshes.items():
             if mesh.Positions.Count:
                 group.Children.Add(GeometryModel3D(mesh, _material(colors[kind], solid)))
+        neighbors = data.get("neighbors") or []
+        if neighbors:
+            # beams, slabs, footings... touching the column, see-through gray
+            mesh = MeshGeometry3D()
+            for n in neighbors:
+                for a, b, c in n["triangles"]:
+                    base = mesh.Positions.Count
+                    for x, y, z in (a, b, c):
+                        mesh.Positions.Add(Point3D(x, y, z))
+                    for idx in (base, base + 1, base + 2):
+                        mesh.TriangleIndices.Add(idx)
+            gray = DiffuseMaterial(SolidColorBrush(_color(150, 155, 165, 110)))
+            model = GeometryModel3D(mesh, gray)
+            model.BackMaterial = gray
+            group.Children.Add(model)
         if detail != u"Bajo":
             concrete = MeshGeometry3D()
             _add_prism(concrete, data["polygon"], data["height"])

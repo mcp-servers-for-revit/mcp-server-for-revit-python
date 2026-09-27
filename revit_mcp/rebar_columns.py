@@ -563,3 +563,85 @@ def record_weight(column, created):
     if p is not None and not p.IsReadOnly:
         p.Set(round(sum(kg_by_kind.values()), 2))
     return kg_by_kind, bars, stick_out
+
+
+# --- Elements around the column, for the elevation and 3D views ---------------
+
+NEIGHBOR_CATEGORIES = (
+    (DB.BuiltInCategory.OST_StructuralFraming, u"VIGA"),
+    (DB.BuiltInCategory.OST_Floors, u"LOSA"),
+    (DB.BuiltInCategory.OST_StructuralFoundation, u"ZAPATA"),
+    (DB.BuiltInCategory.OST_Walls, u"MURO"),
+    (DB.BuiltInCategory.OST_StructuralColumns, u"COLUMNA"),
+)
+
+
+def column_neighbors(doc, column, section, reach_m=0.6, contact_m=0.02):
+    """Elements touching the column (within `contact_m`) - beams, slabs,
+    footings, walls, the columns above/below - cut to `reach_m` around it,
+    in the column's local frame (meters; x/y from the section center, z
+    from the column base). Returns [{"label", "triangles": [(p, p, p)],
+    "box": (x0, y0, z0, x1, y1, z1)}]."""
+    bb = column.get_BoundingBox(None)
+    if bb is None:
+        return []
+    touch = contact_m / FT
+    near = DB.Outline(
+        DB.XYZ(bb.Min.X - touch, bb.Min.Y - touch, bb.Min.Z - touch),
+        DB.XYZ(bb.Max.X + touch, bb.Max.Y + touch, bb.Max.Z + touch),
+    )
+    # Crop box: the section's bounding box grown by reach_m, from reach_m
+    # under the base to reach_m over the top, in the column's own frame.
+    xs = [p[0] for p in section.polygon_m]
+    ys = [p[1] for p in section.polygon_m]
+    x0, x1 = min(xs) - reach_m, max(xs) + reach_m
+    y0, y1 = min(ys) - reach_m, max(ys) + reach_m
+    z0 = section.z_bottom - reach_m / FT
+    corners = [section.point_m(x, y, z0) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+    loop = DB.CurveLoop()
+    for k in range(4):
+        loop.Append(DB.Line.CreateBound(corners[k], corners[(k + 1) % 4]))
+    crop = DB.GeometryCreationUtilities.CreateExtrusionGeometry(
+        List[DB.CurveLoop]([loop]), DB.XYZ.BasisZ,
+        (section.z_top - section.z_bottom) + 2 * reach_m / FT,
+    )
+    inverse = section.transform.Inverse
+
+    def local(p):
+        q = inverse.OfPoint(p)
+        return ((q.X - section.center[0]) * FT, (q.Y - section.center[1]) * FT,
+                (p.Z - section.z_bottom) * FT)
+
+    result = []
+    options = DB.Options()
+    for bic, label in NEIGHBOR_CATEGORIES:
+        found = (
+            DB.FilteredElementCollector(doc)
+            .OfCategory(bic)
+            .WhereElementIsNotElementType()
+            .WherePasses(DB.BoundingBoxIntersectsFilter(near))
+        )
+        for element in found:
+            if element.Id == column.Id:
+                continue
+            triangles = []
+            for solid in _solids(element.get_Geometry(options)):
+                try:
+                    part = DB.BooleanOperationsUtils.ExecuteBooleanOperation(
+                        solid, crop, DB.BooleanOperationsType.Intersect)
+                except Exception:
+                    continue
+                if part is None or part.Volume < 1e-6:
+                    continue
+                for face in part.Faces:
+                    mesh = face.Triangulate()
+                    for i in range(mesh.NumTriangles):
+                        tri = mesh.get_Triangle(i)
+                        triangles.append(tuple(local(tri.get_Vertex(k)) for k in range(3)))
+            if not triangles:
+                continue
+            pts = [p for tri in triangles for p in tri]
+            box = (min(p[0] for p in pts), min(p[1] for p in pts), min(p[2] for p in pts),
+                   max(p[0] for p in pts), max(p[1] for p in pts), max(p[2] for p in pts))
+            result.append({"label": label, "triangles": triangles, "box": box})
+    return result
