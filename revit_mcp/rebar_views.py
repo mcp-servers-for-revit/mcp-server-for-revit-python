@@ -11,9 +11,9 @@ Runs inside Revit's IronPython engine - no f-strings.
 """
 import math
 
-from System.Windows import FontWeights, Size
+from System.Windows import FontWeights, Point, Size
 from System.Windows.Controls import Canvas, TextBlock
-from System.Windows.Media import Color, Colors, DoubleCollection, SolidColorBrush
+from System.Windows.Media import Color, Colors, DoubleCollection, RotateTransform, SolidColorBrush
 from System.Windows.Media.Media3D import (
     AmbientLight,
     DiffuseMaterial,
@@ -193,24 +193,77 @@ def _widen(data):
     return max(1.0, min(4.0, data["height"] / (data["width"] * 4.0)))
 
 
-DIM_CHAIN_X = 0.30  # dimension lines, measured left of the column face
-DIM_TOTAL_X = 0.48
+def _vtext(canvas, frame, x, y, text, brush, size=10):
+    """Text turned 90 degrees (reading upwards) just left of the vertical
+    line at x, centred on y - how a vertical dimension is written."""
+    tb = TextBlock()
+    tb.Text = text
+    tb.FontSize = size
+    tb.Foreground = brush
+    tb.IsHitTestVisible = False
+    tb.Measure(Size(1e4, 1e4))
+    w, h = tb.DesiredSize.Width, tb.DesiredSize.Height
+    px, py = _px(frame, x, y)
+    tb.RenderTransformOrigin = Point(0.5, 0.5)
+    tb.RenderTransform = RotateTransform(-90)
+    cx = px - 3 - h / 2.0  # the turned text is h wide
+    Canvas.SetLeft(tb, cx - w / 2.0)
+    Canvas.SetTop(tb, py - h / 2.0)
+    canvas.Children.Add(tb)
+    return w  # its length along the line, in pixels
 
 
-def _dimension(canvas, frame, x, z0, z1, text, x_from):
+def _elevation_unit(data):
+    """Spacing unit (m) of the elevation's annotations: 1/25 of the drawing
+    height, so dimensions and texts keep the same room at any size."""
+    zs = [0.0, data["height"]]
+    zs += [z for n in data.get("neighbors", []) for z in (n["box"][2], n["box"][5])]
+    return max(max(zs) - min(zs), 1.0) / 25.0
+
+
+def _dimension_layout(data):
+    """(edge, x_chain, x_total): the left edge of the drawing (the slab,
+    beam or footing reaching furthest, or the zone bands), and the x of
+    the dimension chain and of the total height, well clear of it."""
+    widen = _widen(data)
+    half = data["width"] * widen / 2.0
+    u = _elevation_unit(data)
+    edge = min([-half - 0.17] + [n["box"][0] * widen for n in data.get("neighbors", [])])
+    x_chain = edge - 1.6 * u
+    return edge, x_chain, x_chain - 2.6 * u
+
+
+def _dimension(canvas, frame, x, z0, z1, text, x_from, u, place=0):
     """A vertical dimension at x from z0 to z1: extension lines from
-    x_from, the dimension line with ticks, and its value to the left."""
+    x_from, the dimension line with ticks and its value written along it.
+    A value that doesn't fit between the ticks goes past the end: place
+    -1 below z0, +1 above z1 (0 keeps it in the middle)."""
+    t = 0.25 * u
     for z in (z0, z1):
-        _line(canvas, frame, (x_from, z), (x - 0.03, z), C_DIM, 0.8)
-        _line(canvas, frame, (x - 0.02, z - 0.02), (x + 0.02, z + 0.02), C_DIM, 1.2)
+        _line(canvas, frame, (x_from, z), (x - t, z), C_DIM, 0.8)
+        _line(canvas, frame, (x - t * 0.7, z - t * 0.7), (x + t * 0.7, z + t * 0.7), C_DIM, 1.2)
     _line(canvas, frame, (x, z0), (x, z1), C_DIM, 1)
-    _text(canvas, frame, x - 0.03, (z0 + z1) / 2.0, text, brush=C_DIM, size=10, anchor="right")
+    scale = frame[0]
+    probe = TextBlock()
+    probe.Text = text
+    probe.FontSize = 10
+    probe.Measure(Size(1e4, 1e4))
+    length = probe.DesiredSize.Width / scale  # meters along the line
+    if length + 0.3 * u < z1 - z0 or place == 0:
+        z = (z0 + z1) / 2.0
+    elif place > 0:
+        z = z1 + 0.2 * u + length / 2.0
+        _line(canvas, frame, (x, z1), (x, z1 + 0.2 * u + length), C_DIM, 0.8)
+    else:
+        z = z0 - 0.2 * u - length / 2.0
+        _line(canvas, frame, (x, z0), (x, z0 - 0.2 * u - length), C_DIM, 0.8)
+    _vtext(canvas, frame, x, z, text, C_DIM)
 
 
-def _dimensions(canvas, frame, data, half):
-    """Dimensions on the left of the elevation: a chain through footing,
-    clear height and the beam/slab over it, plus the column's total
-    height further out."""
+def _dimensions(canvas, frame, data):
+    """Dimensions on the left of the elevation, past the slab/footing: a
+    chain through footing, clear height and the beam/slab over it, plus
+    the column's total height further out."""
     height, clear = data["height"], data["clear"]
     neighbors = data.get("neighbors", [])
     marks = [0.0, clear, height]
@@ -224,19 +277,31 @@ def _dimensions(canvas, frame, data, half):
     for z in sorted(marks):
         if not levels or z - levels[-1] > 0.01:
             levels.append(z)
-    x_chain = -half - DIM_CHAIN_X
-    for z0, z1 in zip(levels, levels[1:]):
-        _dimension(canvas, frame, x_chain, z0, z1, u"{:.2f}".format(z1 - z0), -half)
-    _dimension(canvas, frame, -half - DIM_TOTAL_X, 0.0, height, u"H {:.2f}".format(height), x_chain)
+    u = _elevation_unit(data)
+    edge, x_chain, x_total = _dimension_layout(data)
+    x_from = edge - 0.3 * u  # extension lines start a little off the drawing
+    spans = list(zip(levels, levels[1:]))
+    for i, (z0, z1) in enumerate(spans):
+        # short spans at the ends write their value outside the chain
+        place = -1 if i == 0 else (1 if i == len(spans) - 1 else 0)
+        _dimension(canvas, frame, x_chain, z0, z1, u"{:.2f}".format(z1 - z0), x_from, u, place)
+    _dimension(canvas, frame, x_total, 0.0, height, u"H = {:.2f}".format(height), x_chain, u)
+
+
+def _floor(data):
+    return min([0.0] + [n["box"][2] for n in data.get("neighbors", [])])
 
 
 def elevation_extent(data):
+    u = _elevation_unit(data)
     half = data["width"] * _widen(data) / 2.0
-    zs = [z for n in data.get("neighbors", []) for z in (n["box"][2], n["box"][5])]
-    bottom = min([-0.17] + [z - 0.17 for z in zs])
-    top = max([data["height"] + 0.14] + [z + 0.08 for z in zs])
-    # room on the left for the zone bands and the two dimension lines
-    return -half - DIM_TOTAL_X - 0.34, bottom, half + 0.30, top
+    neighbors = data.get("neighbors", [])
+    zs = [z for n in neighbors for z in (n["box"][2], n["box"][5])]
+    right = max([half + 0.30] + [n["box"][3] * _widen(data) for n in neighbors])
+    top = max([data["height"]] + zs) + 1.2 * u
+    bottom = _floor(data) - 2.8 * u  # "Luz libre" and the message
+    _, _, x_total = _dimension_layout(data)
+    return x_total - 1.2 * u, bottom, right, top
 
 
 def draw_elevation(canvas, data, frame):
@@ -305,12 +370,12 @@ def draw_elevation(canvas, data, frame):
     for offset in data.get("joint", []):
         _line(canvas, frame, (-half + 0.01, clear + offset), (half - 0.01, clear + offset), C_EDGE, 2)
 
-    _dimensions(canvas, frame, data, half)
-    # below everything (a footing under the base included)
-    floor = min([0.0] + [n["box"][2] for n in neighbors])
-    _text(canvas, frame, 0.0, floor - 0.045, u"Luz libre {:.2f} m".format(clear), brush=C_DIM, size=10)
+    _dimensions(canvas, frame, data)
+    # below everything (a footing under the base included), one line each
+    floor, u = _floor(data), _elevation_unit(data)
+    _text(canvas, frame, 0.0, floor - 0.8 * u, u"Luz libre {:.2f} m".format(clear), brush=C_DIM, size=10)
     if data.get("message"):
-        _text(canvas, frame, 0.0, floor - 0.13, data["message"], brush=_brush(192, 57, 43), size=10)
+        _text(canvas, frame, 0.0, floor - 2.0 * u, data["message"], brush=_brush(192, 57, 43), size=10)
 
 
 # --- 3D -----------------------------------------------------------------------

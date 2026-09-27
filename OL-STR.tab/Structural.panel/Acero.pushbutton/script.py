@@ -314,6 +314,7 @@ class AceroWindow(forms.WPFWindow):
         for item in self.list_types.Items:
             if item.Tag == type_id and self.list_types.SelectedItem is not item:
                 self.list_types.SelectedItem = item
+                self.list_types.ScrollIntoView(item)
         cfg = t.config()
         self._set_form({
             "conf": cfg["EA_Estribo_Conf_Diametro"] or u'3/8"',
@@ -1091,19 +1092,53 @@ class AceroWindow(forms.WPFWindow):
         self.redraw()
 
     # -- elevation and 3D views ----------------------------------------------
+    def _column_info(self, column, fallback):
+        """(section, clear height m, neighbors) of one column, cached."""
+        key = id_of(column.Id)
+        if key not in self._section_cache:
+            try:
+                self._section_cache[key] = rc.Section(column)
+            except Exception:
+                self._section_cache[key] = fallback
+        section = self._section_cache[key]
+        if key not in self._clear_cache:
+            try:
+                top = rc.clear_top(doc, column, section)
+            except Exception:
+                top = section.z_top
+            self._clear_cache[key] = (top - section.z_bottom) * rc.FT
+        if key not in self._neighbor_cache:
+            try:
+                self._neighbor_cache[key] = rc.column_neighbors(doc, column, section)
+            except Exception:
+                self._neighbor_cache[key] = []
+        return section, self._clear_cache[key], self._neighbor_cache[key]
+
     def _fill_view_columns(self, t):
-        """List the type's columns for the 3D view / elevation, the one
-        picked in the model (if any) first choice."""
+        """List the type's columns for the 3D view / elevation, each with
+        what it touches. First choice: the column picked in the model,
+        else the first one a beam frames into, else the first one."""
         self._filling_columns = True
         try:
             labels = []
-            default = 0
+            picked_at = beam_at = None
             picked = set(self.state.picked_ids)
             for index, column in enumerate(t.columns):
                 level = doc.GetElement(column.LevelId)
-                labels.append(u"{} - {}".format(id_of(column.Id), level.Name if level else u"sin nivel"))
-                if id_of(column.Id) in picked and default == 0:
-                    default = index
+                kinds = []
+                if t.section is not None:
+                    for n in self._column_info(column, t.section)[2]:
+                        name = n["label"].lower()
+                        if name not in kinds:
+                            kinds.append(name)
+                labels.append(u"{} - {}{}".format(
+                    id_of(column.Id), level.Name if level else u"sin nivel",
+                    u"  ({})".format(u", ".join(kinds)) if kinds else u""))
+                if picked_at is None and id_of(column.Id) in picked:
+                    picked_at = index
+                if beam_at is None and u"viga" in kinds:
+                    beam_at = index
+            default = next(i for i in (picked_at, beam_at, 0) if i is not None)
             self.cbo_view_column.ItemsSource = List[str](labels)
             self.cbo_view_column.SelectedIndex = default
             self._view_column = t.columns[default]
@@ -1149,27 +1184,8 @@ class AceroWindow(forms.WPFWindow):
         # The column chosen in "Columna:" (each has its own height and
         # its own beams, slab and footing).
         column = self._view_column if self._view_column in t.columns else t.columns[0]
-        key = id_of(column.Id)
-        if key not in self._section_cache:
-            try:
-                self._section_cache[key] = rc.Section(column)
-            except Exception:
-                self._section_cache[key] = t.section
-        section = self._section_cache[key]
+        section, clear, neighbors = self._column_info(column, t.section)
         height = (section.z_top - section.z_bottom) * rc.FT
-        if key not in self._clear_cache:
-            try:
-                top = rc.clear_top(doc, column, section)
-            except Exception:
-                top = section.z_top
-            self._clear_cache[key] = (top - section.z_bottom) * rc.FT
-        clear = self._clear_cache[key]
-        if key not in self._neighbor_cache:
-            try:
-                self._neighbor_cache[key] = rc.column_neighbors(doc, column, section)
-            except Exception:
-                self._neighbor_cache[key] = []
-        neighbors = self._neighbor_cache[key]
         f = self._get_form()
         edge, edge_msg = self._family_view(f["edge"], f["edge_dist"], clear)
         conf, conf_msg = self._family_view(f["conf"], f["conf_dist"], clear)
@@ -1674,6 +1690,8 @@ def pick_columns(state):
     state.checked |= set(id_of(c.GetTypeId()) for c in picked if c is not None)
     if state.picked_ids:
         state.scope = "pick"
+        # show the type (and, in the views, the column) just picked
+        state.active = id_of(doc.GetElement(DB.ElementId(state.picked_ids[0])).GetTypeId())
 
 
 # --- main -------------------------------------------------------------------
@@ -1689,6 +1707,7 @@ if preselected:
     state.picked_ids = [id_of(c.Id) for c in preselected]
     state.checked = set(id_of(c.GetTypeId()) for c in preselected)
     state.scope = "pick"
+    state.active = id_of(preselected[0].GetTypeId())
 
 xaml = os.path.join(SCRIPT_DIR, "AceroForm.xaml")
 while True:

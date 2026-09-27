@@ -222,11 +222,12 @@
                             <ComboBox DockPanel.Dock="Right" x:Name="cbo_detail" Width="80" Margin="0,0,6,0"
                                       SelectionChanged="detail_changed"/>
                             <TextBlock DockPanel.Dock="Right" Text="Nivel de detalle: " VerticalAlignment="Center"/>
-                            <ComboBox DockPanel.Dock="Right" x:Name="cbo_view_column" Width="190" Margin="0,0,12,0"
-                                      SelectionChanged="view_column_changed"
-                                      ToolTip="Cual de las columnas de este tipo se ve en la vista 3D y el alzado (con sus vigas, losa y zapata)."/>
-                            <TextBlock DockPanel.Dock="Right" Text="Columna: " VerticalAlignment="Center"/>
                             <TextBlock Text="VISTA 3D" FontWeight="Bold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                            <TextBlock DockPanel.Dock="Left" Text="Columna: " VerticalAlignment="Center"/>
+                            <ComboBox x:Name="cbo_view_column" SelectionChanged="view_column_changed"
+                                      ToolTip="Cual de las columnas de este tipo se ve en la vista 3D y el alzado; entre parentesis, lo que toca (viga, losa, zapata)."/>
                         </DockPanel>
                         <Border x:Name="border3d" BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White"
                                 ClipToBounds="True"
