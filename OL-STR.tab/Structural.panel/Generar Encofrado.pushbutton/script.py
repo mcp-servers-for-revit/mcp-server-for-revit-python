@@ -3,7 +3,7 @@
 columnas, vigas, losas, muros y cimentacion de concreto, evitando doble
 conteo en caras de contacto entre elementos estructurales."""
 
-__title__ = "Generar\nEncofrado"
+__title__ = "Encofrado"
 __author__ = "Revit MCP"
 
 import os
@@ -278,7 +278,7 @@ if dry_run:
         doc, elements_by_category, config, warnings, context_elements_by_category
     )
 else:
-    with revit.Transaction("Generar Encofrado"):
+    with revit.Transaction("Encofrado"):
         warnings.extend(fw_params.ensure_shared_parameters(doc))
         report = fw_geom.process_formwork(
             doc, elements_by_category, config, warnings, context_elements_by_category
