@@ -249,3 +249,35 @@ class TestCoverFit:
         rect = (-0.11, -0.36, 0.11, 0.36)
         pts = rect_vertices(rect, '3/8"', 0.0079375)
         assert outer_rect(pts, [], '3/8"', 0.0079375) == tuple(pytest.approx(v) for v in rect)
+
+
+class TestCoverLimit:
+    section = [(-0.15, -0.40), (0.15, -0.40), (0.15, 0.40), (-0.15, 0.40)]
+
+    def test_corner_past_the_cover_is_refused(self):
+        from revit_mcp.rebar_spec import fit_vertex
+
+        # cover 4 cm + 3/8" stirrup: free corners must stay within |x| <= 0.1005
+        assert fit_vertex((0.12, 0.0), self.section, 0.04, '3/8"') is None
+        assert fit_vertex((0.0, -0.39), self.section, 0.04, '3/8"') is None
+
+    def test_corner_near_the_limit_snaps_onto_it(self):
+        from revit_mcp.rebar_spec import fit_vertex
+
+        x, y = fit_vertex((0.09, 0.0), self.section, 0.04, '3/8"')
+        assert x == pytest.approx(0.15 - 0.04 - 0.009525) and y == 0.0
+
+    def test_trapezoid_uses_the_real_outline(self):
+        from revit_mcp.rebar_spec import fit_vertex
+
+        trap = [(-0.355, -0.125), (0.355, -0.125), (0.385, 0.125), (-0.385, 0.125)]
+        assert fit_vertex((0.30, 0.0), trap, 0.04, '3/8"', rectangular=False) == (0.30, 0.0)
+        assert fit_vertex((0.34, -0.07), trap, 0.04, '3/8"', rectangular=False) is None
+
+    def test_whole_stirrup_check(self):
+        from revit_mcp.rebar_spec import stirrup_inside_cover
+
+        inside = [(-0.10, -0.35), (0.10, -0.35), (0.10, 0.35), (-0.10, 0.35)]
+        outside = [(-0.13, -0.35), (0.10, -0.35), (0.10, 0.35), (-0.13, 0.35)]
+        assert stirrup_inside_cover(inside, [], '3/8"', 0.0, self.section, 0.04)
+        assert not stirrup_inside_cover(outside, [], '3/8"', 0.0, self.section, 0.04)

@@ -65,6 +65,7 @@ C_CONFINEMENT = brush(40, 150, 90)  # confinement stirrups and ties
 C_DRAFT = brush(40, 110, 220)
 C_CURSOR = brush(40, 110, 220, 160)
 C_LABEL_BG = brush(255, 255, 255, 200)
+C_REFUSED = brush(192, 57, 43)  # cursor where a stirrup corner is refused
 
 
 def id_of(element_id):
@@ -144,6 +145,7 @@ class AceroWindow(forms.WPFWindow):
         self.undo_stack = []
         self.draft = []  # stirrup vertices / tie start being drawn (meters)
         self.cursor_m = None
+        self.cursor_on_bar = False
         self.dirty = False
 
         self.cbo_conf.ItemsSource = List[str](STIRRUP_DIAMETERS)
@@ -307,6 +309,15 @@ class AceroWindow(forms.WPFWindow):
             ) and len(s.polygon_m) == len(a.polygon_m):
                 same_section.append(type_id)
         has_drawing = bool(self.design["bars"] or self.design["stirrups"] or self.design["ties"])
+        outside = [i + 1 for i, (kind, poly, wrap) in enumerate(self.design["stirrups"])
+                   if self._outside_cover(kind, poly, wrap)]
+        if outside:
+            forms.alert(
+                u"El estribo {} se sale del recubrimiento. Seleccionalo con 'Editar' y pulsa "
+                u"'Aplicar' para acomodarlo dentro (o borralo).".format(
+                    u", ".join(str(i) for i in outside)),
+                title="Acero")
+            return False
         try:
             for type_id in targets:
                 # The drawing is checked only where it gets saved.
@@ -631,7 +642,10 @@ class AceroWindow(forms.WPFWindow):
         for x, y in self.draft:
             self._dot(frame, x, y, 4, C_DRAFT)
         if self.cursor_m:
-            self._dot(frame, self.cursor_m[0], self.cursor_m[1], 3, C_CURSOR)
+            refused = tool in ("stirrup", "rect") and self._accept_vertex(
+                self.cursor_m, self.cursor_on_bar) is None
+            self._dot(frame, self.cursor_m[0], self.cursor_m[1], 4 if refused else 3,
+                      C_REFUSED if refused else C_CURSOR)
 
     @staticmethod
     def _rect(a, b):
@@ -655,6 +669,43 @@ class AceroWindow(forms.WPFWindow):
         except ValueError:
             return None
         return rs.cover_bounds(section.polygon_m, cover)
+
+    def _cover_m(self):
+        try:
+            return float((self.txt_cover.Text or u"").replace(u",", u".")) / 100.0
+        except ValueError:
+            return None
+
+    def _status(self, text=u""):
+        """Warning line over the drawing (hidden when empty)."""
+        self.txt_status.Text = text
+        self.txt_status.Visibility = Visibility.Visible if text else Visibility.Collapsed
+
+    def _accept_vertex(self, point, on_bar):
+        """The clicked stirrup corner, moved onto the cover limit when just
+        inside it; None when the stirrup would leave the cover there."""
+        t = self.by_id.get(self.state.active)
+        section = t.section if t else None
+        cover = self._cover_m()
+        if section is None or cover is None:
+            return point
+        radius = 0.0
+        if on_bar:
+            for x, y, key in self.design["bars"]:
+                if abs(x - point[0]) < 1e-6 and abs(y - point[1]) < 1e-6:
+                    radius = rs.BAR_DIAMETERS_MM[key] / 2000.0
+        key = self._family_key(self.kind_for["stirrup"])
+        return rs.fit_vertex(point, section.polygon_m, cover, key, radius,
+                             rectangular=section.is_rectangle)
+
+    def _outside_cover(self, kind, poly, wrap):
+        t = self.by_id.get(self.state.active)
+        section = t.section if t else None
+        cover = self._cover_m()
+        if section is None or cover is None:
+            return False
+        return not rs.stirrup_inside_cover(poly, self.design["bars"], self._family_key(kind),
+                                           wrap, section.polygon_m, cover)
 
     def _fitted_rect(self, a, b):
         """Two-point stirrup between corners a and b, with its sides that
@@ -759,10 +810,11 @@ class AceroWindow(forms.WPFWindow):
         frame = self._frame()
         if frame is None:
             return
-        cursor, _ = self.snap(frame, args.GetPosition(self.canvas))
+        cursor, on_bar = self.snap(frame, args.GetPosition(self.canvas))
         if cursor == self.cursor_m:
             return  # same snapped point: nothing to redraw
         self.cursor_m = cursor
+        self.cursor_on_bar = on_bar
         self.redraw()
 
     def canvas_left(self, sender, args):
@@ -776,19 +828,25 @@ class AceroWindow(forms.WPFWindow):
             if not on_bar:
                 self._push_undo()
                 self.design["bars"].append((point[0], point[1], self.bar_key))
-        elif tool == "stirrup":
-            if len(self.draft) >= 3 and point == self.draft[0]:
-                self._close_stirrup()
-            elif not self.draft or point != self.draft[-1]:
-                self.draft.append(point)
-        elif tool == "rect":
-            if not self.draft:
-                self.draft = [point]
+        elif tool in ("stirrup", "rect"):
+            corner = self._accept_vertex(point, on_bar)
+            if corner is None:
+                self._status(u"Fuera del recubrimiento: haz clic dentro de la linea punteada.")
+            elif tool == "stirrup":
+                self._status()
+                if len(self.draft) >= 3 and corner == self.draft[0]:
+                    self._close_stirrup()
+                elif not self.draft or corner != self.draft[-1]:
+                    self.draft.append(corner)
+            elif not self.draft:
+                self._status()
+                self.draft = [corner]
             else:
-                rect = self._fitted_rect(self.draft[0], point)
+                rect = self._fitted_rect(self.draft[0], corner)
                 if rect:
                     self.draft = rect
-                    self._close_stirrup()
+                    if not self._close_stirrup():
+                        self.draft = []
         elif tool == "tie":
             self._place_tie(self.to_m(frame, p))
         elif tool == "edit":
@@ -807,12 +865,18 @@ class AceroWindow(forms.WPFWindow):
     def _close_stirrup(self):
         """Add the drawn stirrup (it keeps the radius of the bars it wraps,
         so editing its measures later can't shift it) and show them."""
-        self._push_undo()
         pts = list(self.draft)
-        self.design["stirrups"].append(
-            (self.kind_for["stirrup"], pts, rs.wrap_radius(pts, self.design["bars"])))
+        kind = self.kind_for["stirrup"]
+        wrap = rs.wrap_radius(pts, self.design["bars"])
+        if self._outside_cover(kind, pts, wrap):
+            self._status(u"Ese estribo se sale del recubrimiento; corrige sus esquinas (Deshacer quita la ultima).")
+            return False
+        self._status()
+        self._push_undo()
+        self.design["stirrups"].append((kind, pts, wrap))
         self.draft = []
         self._select(len(self.design["stirrups"]) - 1)
+        return True
 
     def _stirrup_at(self, frame, p):
         """Index of the stirrup whose outline passes nearest the click, or None."""

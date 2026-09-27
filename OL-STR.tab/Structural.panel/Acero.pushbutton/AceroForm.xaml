@@ -133,6 +133,8 @@
                     <Button Content="Autom&#225;tico" Width="85" Click="auto_click"
                             ToolTip="Reparte esas barras y dibuja el estribo de borde (solo secciones rectangulares)."/>
                 </WrapPanel>
+                <TextBlock DockPanel.Dock="Top" x:Name="txt_status" Foreground="#FFC0392B" FontWeight="Bold"
+                           TextWrapping="Wrap" Margin="0,0,0,4" Visibility="Collapsed"/>
                 <!-- Measures of the selected stirrup (outer face, cm) -->
                 <Border DockPanel.Dock="Top" x:Name="panel_measures" Visibility="Collapsed" Margin="0,0,0,4"
                         Padding="6,4,6,4" Background="#FFEAF2FC" BorderBrush="#FF9DBEE8" BorderThickness="1">

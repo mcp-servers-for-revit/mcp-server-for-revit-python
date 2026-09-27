@@ -606,3 +606,37 @@ def outer_rect(vertices, bars, stirrup_key, wrap=None):
     xs = [x for x, _ in outline]
     ys = [y for _, y in outline]
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def fit_vertex(point, section_polygon, cover, stirrup_key, bar_radius=0.0,
+               rectangular=True, snap=COVER_SNAP, tol=1e-4):
+    """A stirrup corner clicked at `point` (on a bar of `bar_radius`, or 0
+    for a free point), or None if the stirrup would leave the cover there.
+    In a rectangular section a free corner within `snap` inside the limit
+    is moved onto it; a corner past the limit is never accepted."""
+    margin = cover + BAR_DIAMETERS_MM[stirrup_key] / 1000.0 + bar_radius
+    zone = offset_polygon_outward(section_polygon, -margin)
+    x, y = point
+    if rectangular:
+        x0 = min(p[0] for p in zone)
+        x1 = max(p[0] for p in zone)
+        y0 = min(p[1] for p in zone)
+        y1 = max(p[1] for p in zone)
+        if not (x0 - tol <= x <= x1 + tol and y0 - tol <= y <= y1 + tol):
+            return None
+        if not bar_radius:
+            x = x0 if x - x0 <= snap else (x1 if x1 - x <= snap else x)
+            y = y0 if y - y0 <= snap else (y1 if y1 - y <= snap else y)
+        return (x, y)
+    if point_in_polygon(point, zone) or distance_to_polygon(point, zone) <= tol:
+        return point
+    return None
+
+
+def stirrup_inside_cover(vertices, bars, stirrup_key, wrap, section_polygon, cover, tol=1e-3):
+    """Does the stirrup's outer face stay within the cover?"""
+    zone = offset_polygon_outward(section_polygon, -cover)
+    for p in stirrup_outline(vertices, bars, stirrup_key, wrap):
+        if not (point_in_polygon(p, zone) or distance_to_polygon(p, zone) <= tol):
+            return False
+    return True
