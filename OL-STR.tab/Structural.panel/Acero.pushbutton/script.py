@@ -18,7 +18,6 @@ if REVIT_MCP_DIR not in sys.path:
     sys.path.append(REVIT_MCP_DIR)
 
 import formwork_spatial as fw_spatial
-import formwork_geometry as fw_geom
 import formwork_params as fw_params
 import rebar_spec as rs
 import rebar_columns as rc
@@ -29,7 +28,6 @@ import utils as fw_utils
 # are picked up (same as the Encofrado button).
 reload(fw_utils)
 reload(fw_spatial)
-reload(fw_geom)
 reload(fw_params)
 reload(rs)
 reload(rc)
@@ -54,7 +52,6 @@ doc = revit.doc
 
 COLUMNS_BIC = DB.BuiltInCategory.OST_StructuralColumns
 STIRRUP_DIAMETERS = [u"6mm", u"8mm", u'1/4"', u'3/8"', u"12mm", u'1/2"']
-BAR_DIAMETERS = [u'3/8"', u"12mm", u'1/2"', u'5/8"', u'3/4"', u'1"', u'1 3/8"']
 SNAP_PX = 12  # a click this close to a bar snaps to it
 MARGIN_PX = 30
 
@@ -116,8 +113,7 @@ class State(object):
         self.active = None
         self.drafts = {}  # type id -> design being drawn (unsaved)
         self.form = None  # last form field values
-        self.scope = "model"
-        self.scope_level_index = -1
+        self.scope = "model"  # "pick" when columns were picked in the model
 
 
 class _ColumnFilter(ISelectionFilter):
@@ -227,13 +223,13 @@ class AceroWindow(forms.WPFWindow):
         self.cbo_conf.ItemsSource = List[str](STIRRUP_DIAMETERS)
         self.cbo_edge.ItemsSource = List[str](STIRRUP_DIAMETERS)
         # "Ø acero" of the sketch: which stirrup family a new stirrup/tie
-        # uses, or the diameter of a new longitudinal bar.
+        # uses. A new longitudinal bar takes the diameter of the "Barras"
+        # option chosen.
         self.kind_for = {"stirrup": rs.KIND_EDGE, "tie": rs.KIND_CONFINEMENT}
+        self.bar_tools = [(self.rb_bar_1, u'1/2"'), (self.rb_bar_2, u'5/8"'),
+                          (self.rb_bar_3, u'3/4"'), (self.rb_bar_4, u'1"')]
         self.bar_key = u'5/8"'
         self._updating_steel = False
-        for combo in (self.cbo_bar_corner, self.cbo_bar_face_x, self.cbo_bar_face_y):
-            combo.ItemsSource = List[str](BAR_DIAMETERS)
-            combo.SelectedItem = u'5/8"'
         self.selected = None  # index of the stirrup whose measures are shown
         # Plan / elevation / 3D views: zoom-pan state and what they last showed.
         self.plan_nav = rv.Nav2D()
@@ -248,15 +244,6 @@ class AceroWindow(forms.WPFWindow):
         self._section_cache = {}  # column id -> rc.Section
         self._view_column = None  # the column the 3D view and elevation show
         self._filling_columns = False
-        self.levels = sorted(
-            DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements(),
-            key=lambda lv: lv.ProjectElevation,
-        )
-        self.cbo_scope_level.ItemsSource = List[str]([lv.Name for lv in self.levels])
-        self.cbo_scope_level.SelectedIndex = state.scope_level_index
-        {"level": self.rb_scope_level, "pick": self.rb_scope_pick}.get(
-            state.scope, self.rb_scope_model
-        ).IsChecked = True
 
         self._refresh_steel()
         self.rebar_shapes = read_rebar_shapes()
@@ -342,9 +329,6 @@ class AceroWindow(forms.WPFWindow):
         self.scene._extent = None  # refit the 3D camera to the new column
         self._update_measures()
         section = t.section
-        if section is not None and section.is_rectangle:
-            self.lbl_face_x.Text = u"Caras de {:.0f} cm: ".format(section.b * rc.FT * 100)
-            self.lbl_face_y.Text = u"Caras de {:.0f} cm: ".format(section.h * rc.FT * 100)
         if section is None:
             self.txt_section.Text = u"Seccion {}: {}".format(t.name, t.section_error)
         else:
@@ -463,14 +447,10 @@ class AceroWindow(forms.WPFWindow):
                 title="Acero", yes=True, no=True,
             ) and not self.save():
                 return
-        if self.rb_scope_level.IsChecked and self.cbo_scope_level.SelectedIndex < 0:
-            forms.alert(u"Elige el nivel.", title="Acero")
-            return
-        if self.rb_scope_pick.IsChecked and not self.state.picked_ids:
-            forms.alert(u"Primero selecciona columnas en el modelo.", title="Acero")
-            return
-        if not self.rb_scope_pick.IsChecked and not self.checked_ids():
-            forms.alert(u"Marca los tipos a generar.", title="Acero")
+        # The columns picked in the model, or else every column of the
+        # checked types.
+        if not self.state.picked_ids and not self.checked_ids():
+            forms.alert(u"Selecciona columnas en el modelo o marca los tipos a generar.", title="Acero")
             return
         self._leave("run")
 
@@ -478,9 +458,7 @@ class AceroWindow(forms.WPFWindow):
         self._keep_draft()
         self.state.checked = set(self.checked_ids())
         self.state.form = self._get_form()
-        self.state.scope = "level" if self.rb_scope_level.IsChecked else (
-            "pick" if self.rb_scope_pick.IsChecked else "model")
-        self.state.scope_level_index = self.cbo_scope_level.SelectedIndex
+        self.state.scope = "pick" if self.state.picked_ids else "model"
         self.action = action
         self.Close()
 
@@ -523,7 +501,7 @@ class AceroWindow(forms.WPFWindow):
             return "rect"
         if self.rb_tie.IsChecked:
             return "tie"
-        if self.rb_bar.IsChecked:
+        if any(rb.IsChecked for rb, _ in self.bar_tools):
             return "bar"
         if self.rb_edit.IsChecked:
             return "edit"
@@ -536,8 +514,8 @@ class AceroWindow(forms.WPFWindow):
 
     def _refresh_steel(self):
         """Fill "Ø acero" for the current tool: the two stirrup families
-        with the diameters set in "2. Configuracion de estribos", or the
-        longitudinal bar diameters."""
+        with the diameters set in "2. Configuracion de estribos" (a bar
+        shows the diameter chosen in "Barras", read only)."""
         tool = self._tool()
         self._updating_steel = True
         try:
@@ -552,9 +530,9 @@ class AceroWindow(forms.WPFWindow):
                 self.cbo_steel.SelectedIndex = 1 if kind == rs.KIND_EDGE else 0
                 self.cbo_steel.IsEnabled = True
             elif tool == "bar":
-                self.cbo_steel.ItemsSource = List[str]([u"Ø" + k for k in BAR_DIAMETERS])
-                self.cbo_steel.SelectedIndex = BAR_DIAMETERS.index(self.bar_key)
-                self.cbo_steel.IsEnabled = True
+                self.cbo_steel.ItemsSource = List[str]([u"Barra Ø" + self.bar_key])
+                self.cbo_steel.SelectedIndex = 0
+                self.cbo_steel.IsEnabled = False
             else:
                 self.cbo_steel.ItemsSource = None
                 self.cbo_steel.IsEnabled = False
@@ -565,6 +543,9 @@ class AceroWindow(forms.WPFWindow):
         if not hasattr(self, "kind_for"):
             return  # fired while the XAML loads
         self.draft = []
+        for rb, key in self.bar_tools:
+            if rb.IsChecked:
+                self.bar_key = key
         if self._tool() not in ("edit",):
             self.selected = None if self._tool() == "erase" else self.selected
         self._refresh_steel()
@@ -583,8 +564,6 @@ class AceroWindow(forms.WPFWindow):
                 self.redraw()
         elif self._steel_slot(tool):
             self.kind_for[self._steel_slot(tool)] = kind
-        elif tool == "bar":
-            self.bar_key = BAR_DIAMETERS[self.cbo_steel.SelectedIndex]
 
     def stirrup_diameter_changed(self, sender, args):
         if not hasattr(self, "kind_for"):
@@ -1508,60 +1487,6 @@ class AceroWindow(forms.WPFWindow):
             del self.design[kind][i]
             self._select(None)
 
-    def auto_click(self, sender, args):
-        t = self.by_id.get(self.state.active)
-        section = t.section if t else None
-        if section is None or not section.is_rectangle:
-            forms.alert(u"La distribucion automatica es solo para secciones rectangulares; "
-                        u"dibuja las barras y estribos.", title="Acero")
-            return
-        f = self._get_form()
-        edge_key = f["edge"]
-        ds = rs.BAR_DIAMETERS_MM[edge_key] / 1000.0
-        try:
-            cover = float(f["cover"].replace(u",", u".")) / 100.0
-            face_x = (int(self.txt_face_x_n.Text or u"0"), self.cbo_bar_face_x.SelectedItem)
-            face_y = (int(self.txt_face_y_n.Text or u"0"), self.cbo_bar_face_y.SelectedItem)
-            if face_x[0] < 0 or face_y[0] < 0:
-                raise ValueError()
-        except ValueError:
-            forms.alert(u"Escribe cuantas barras van en cada cara (0, 1, 2...) y el recubrimiento.",
-                        title="Acero")
-            return
-        corner_key = self.cbo_bar_corner.SelectedItem
-        # The bars sit against the edge stirrup already drawn (rectangular),
-        # or against one placed on the cover.
-        index = None
-        inner = None
-        for i, (kind, poly, wrap, is_open) in enumerate(self.design["stirrups"]):
-            if kind != rs.KIND_EDGE or is_open:
-                continue
-            outline = rs.stirrup_outline(poly, self.design["bars"], edge_key, wrap)
-            if rs.rect_measures(outline, section.polygon_m) is not None:
-                x0, y0, x1, y1 = rs.outer_rect(poly, self.design["bars"], edge_key, wrap)
-                index, inner = i, (x0 + ds, y0 + ds, x1 - ds, y1 - ds)
-                break
-        if inner is None:
-            x0, y0, x1, y1 = rs.cover_bounds(section.polygon_m, cover)
-            inner = (x0 + ds, y0 + ds, x1 - ds, y1 - ds)
-        try:
-            bars = rs.custom_bar_layout(inner, corner_key, face_x, face_y)
-        except rs.SpecError as e:
-            forms.alert(u"{}".format(e), title="Acero")
-            return
-        corners = [(x, y) for x, y, _ in bars[:4]]
-        edge = (rs.KIND_EDGE, corners, rs.BAR_DIAMETERS_MM[corner_key] / 2000.0, False)
-        self._push_undo()
-        self.design["bars"] = bars
-        if index is None:
-            self.design["stirrups"].insert(0, edge)
-            index = 0
-        else:
-            self.design["stirrups"][index] = edge
-        self.draft = []
-        self._select(index)  # show the edge stirrup's measures
-        self.redraw()
-
     def _seat_bar(self, click_m):
         """A new bar clicked near a closed stirrup sits against its inner
         face (in a corner when near one); None when not near any."""
@@ -1721,7 +1646,6 @@ while True:
     break
 
 by_id = dict((t.id, t) for t in types)
-levels = window.levels
 if state.scope == "pick":
     targets = [doc.GetElement(DB.ElementId(i)) for i in state.picked_ids]
     targets = [c for c in targets if c is not None]
@@ -1729,13 +1653,6 @@ if state.scope == "pick":
 else:
     targets = [c for t in state.checked for c in by_id[t].columns]
     scope_label = "tipos marcados, todo el modelo"
-    if state.scope == "level":
-        level = levels[state.scope_level_index]
-        targets = [
-            c for c in targets
-            if fw_geom.element_pour_level_id(c, "columns", levels) == level.Id
-        ]
-        scope_label = u"tipos marcados, vaciado del nivel {}".format(level.Name)
 
 specs = {}
 spec_errors = {}

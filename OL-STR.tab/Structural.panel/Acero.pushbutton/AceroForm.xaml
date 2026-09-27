@@ -6,27 +6,13 @@
         ResizeMode="CanResizeWithGrip"
         PreviewKeyDown="window_key">
     <DockPanel Margin="12">
-        <!-- Bottom: scope + run -->
-        <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="220"/>
-            </Grid.ColumnDefinitions>
-            <GroupBox Grid.Column="0" Header="3. Alcance de la generacion" Padding="8,4,8,4">
-                <WrapPanel VerticalAlignment="Center">
-                    <RadioButton x:Name="rb_scope_model" GroupName="scope" IsChecked="True" Margin="0,2,16,2"
-                                 Content="Tipos marcados (todo el modelo)"/>
-                    <RadioButton x:Name="rb_scope_level" GroupName="scope" Margin="0,2,6,2" VerticalAlignment="Center"
-                                 Content="Tipos marcados, vaciado del nivel"/>
-                    <ComboBox x:Name="cbo_scope_level" Width="170" Margin="0,0,16,0"
-                              IsEnabled="{Binding IsChecked, ElementName=rb_scope_level}"/>
-                    <RadioButton x:Name="rb_scope_pick" GroupName="scope" Margin="0,2,0,2"
-                                 Content="Solo las columnas seleccionadas"/>
-                </WrapPanel>
-            </GroupBox>
-            <Button Grid.Column="1" x:Name="button_run" Content="Generar acero..." Height="40" Margin="10,6,0,0"
-                    FontWeight="Bold" Click="run_click"/>
-        </Grid>
+        <!-- Bottom: run (the columns picked in the model, or else every
+             column of the checked types) -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right" x:Name="button_run" Content="Generar acero..." Width="220" Height="40"
+                    FontWeight="Bold" Click="run_click"
+                    ToolTip="Genera las columnas seleccionadas en el modelo; si no hay ninguna, todas las columnas de los tipos marcados."/>
+        </DockPanel>
 
         <Grid>
             <Grid.ColumnDefinitions>
@@ -115,8 +101,6 @@
                     </RadioButton>
                     <RadioButton x:Name="rb_tie" GroupName="tool" Content="Grapa" Margin="0,0,8,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
-                    <RadioButton x:Name="rb_bar" GroupName="tool" Content="Barra" Margin="0,0,8,0"
-                                 VerticalAlignment="Center" Checked="tool_changed"/>
                     <RadioButton x:Name="rb_edit" GroupName="tool" Content="Editar" Margin="0,0,8,0"
                                  VerticalAlignment="Center" Checked="tool_changed"
                                  ToolTip="Clic en un estribo para ver y cambiar sus medidas y su tipo (borde/confinamiento)."/>
@@ -124,7 +108,7 @@
                                  VerticalAlignment="Center" Checked="tool_changed"/>
                     <TextBlock Text="&#216; acero: " VerticalAlignment="Center"/>
                     <ComboBox x:Name="cbo_steel" Width="190" Margin="0,0,12,0" SelectionChanged="steel_changed"
-                              ToolTip="Estribo y Grapa: el di&#225;metro de la configuraci&#243;n de estribos (borde o confinamiento). Barra: el di&#225;metro de la barra longitudinal."/>
+                              ToolTip="Estribo y Grapa: el di&#225;metro de la configuraci&#243;n de estribos (borde o confinamiento)."/>
                     <Button Content="Deshacer" Width="70" Margin="0,0,4,0" Click="undo_click"/>
                     <Button Content="Limpiar" Width="65" Margin="0,0,4,0" Click="clear_click"/>
                 </WrapPanel>
@@ -136,20 +120,17 @@
                     <RadioButton x:Name="rb_shape_open" GroupName="shape" Content="Abierto (U)" Margin="0,0,20,0"
                                  VerticalAlignment="Center"
                                  ToolTip="Clic en cada punto por las barras que abraza y clic derecho para terminarlo sin cerrar (ej. estribo de confinamiento en U)."/>
-                    <TextBlock Text="Barras:  Esquinas &#216;" VerticalAlignment="Center"/>
-                    <ComboBox x:Name="cbo_bar_corner" Width="62" Margin="2,0,8,0"/>
-                    <TextBlock x:Name="lbl_face_x" Text="Caras de b: " VerticalAlignment="Center"/>
-                    <TextBox x:Name="txt_face_x_n" Width="26" Text="1" VerticalAlignment="Center"
-                             ToolTip="Barras en CADA una de estas dos caras, sin contar las esquinas"/>
-                    <TextBlock Text=" x &#216;" VerticalAlignment="Center"/>
-                    <ComboBox x:Name="cbo_bar_face_x" Width="62" Margin="2,0,8,0"/>
-                    <TextBlock x:Name="lbl_face_y" Text="Caras de h: " VerticalAlignment="Center"/>
-                    <TextBox x:Name="txt_face_y_n" Width="26" Text="2" VerticalAlignment="Center"
-                             ToolTip="Barras en CADA una de estas dos caras, sin contar las esquinas"/>
-                    <TextBlock Text=" x &#216;" VerticalAlignment="Center"/>
-                    <ComboBox x:Name="cbo_bar_face_y" Width="62" Margin="2,0,8,0"/>
-                    <Button Content="Colocar barras" Width="100" Click="auto_click"
-                            ToolTip="Coloca las barras pegadas al estribo de borde (si no hay, lo crea en el recubrimiento). Solo secciones rectangulares."/>
+                    <!-- Longitudinal bars: pick a diameter, then click in the plan -->
+                    <TextBlock Text="Barras: " FontWeight="Bold" VerticalAlignment="Center"
+                               ToolTip="Elige el di&#225;metro y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior)."/>
+                    <RadioButton x:Name="rb_bar_1" GroupName="tool" Content="&#216; 1/2&quot;" Margin="4,0,10,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <RadioButton x:Name="rb_bar_2" GroupName="tool" Content="&#216; 5/8&quot;" Margin="0,0,10,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <RadioButton x:Name="rb_bar_3" GroupName="tool" Content="&#216; 3/4&quot;" Margin="0,0,10,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <RadioButton x:Name="rb_bar_4" GroupName="tool" Content="&#216; 1&quot;" Margin="0,0,10,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
                 </WrapPanel>
                 <TextBlock DockPanel.Dock="Top" x:Name="txt_status" Foreground="#FFC0392B" FontWeight="Bold"
                            TextWrapping="Wrap" Margin="0,0,0,4" Visibility="Collapsed"/>
@@ -177,7 +158,7 @@
                     </WrapPanel>
                 </Border>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
-                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barra: clic donde va (cerca de un estribo se pega a su cara interior). Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
+                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barras: elige el di&#225;metro (1/2&quot;, 5/8&quot;, 3/4&quot; o 1&quot;) y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior); Borrar quita una barra. Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
                 <!-- Three views: 3D (large, left), elevation and plan (the sketch). Mouse wheel
                      zooms, middle button drag pans, "Ajustar" refits; in 3D a
                      left drag orbits. -->
