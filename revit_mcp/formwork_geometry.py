@@ -282,6 +282,42 @@ def element_level_id(element, levels=None):
     return None
 
 
+# Vertical elements are poured with the slab/beams of the level they
+# reach: their top constraint parameter, per category.
+_TOP_LEVEL_PARAMS = {
+    "columns": DB.BuiltInParameter.FAMILY_TOP_LEVEL_PARAM,
+    "walls": DB.BuiltInParameter.WALL_HEIGHT_TYPE,
+    "stairs": DB.BuiltInParameter.STAIRS_TOP_LEVEL_PARAM,
+}
+POUR_LEVEL_TOL_FT = 0.1  # ~3 cm: a top this close above a level counts as reaching it
+
+
+def element_pour_level_id(element, category_key, levels):
+    """Level whose on-site pour includes the element: beams, slabs and
+    foundations go with their own level; columns, walls and stairs with
+    the level they reach (top constraint) - the P01->P02 columns are
+    poured with the P02 beams and slab. An element without a top
+    constraint (unconnected wall, e.g. a parapet) goes with the highest
+    level at or below its top."""
+    top_param = _TOP_LEVEL_PARAMS.get(category_key)
+    if top_param is None:
+        return element_level_id(element, levels)
+    try:
+        p = element.get_Parameter(top_param)
+        if p is not None and p.StorageType == DB.StorageType.ElementId:
+            level_id = p.AsElementId()
+            if level_id != DB.ElementId.InvalidElementId:
+                return level_id
+    except Exception:
+        pass
+    bb = element.get_BoundingBox(None)
+    if bb is not None and levels:
+        below = [lv for lv in levels if lv.ProjectElevation <= bb.Max.Z + POUR_LEVEL_TOL_FT]
+        if below:
+            return max(below, key=lambda lv: lv.ProjectElevation).Id
+    return element_level_id(element, levels)
+
+
 def category_key_of(element):
     """(CATEGORY_MAP key or None, element to process). A stair run or
     landing stands for its whole stair (whose geometry includes them)."""

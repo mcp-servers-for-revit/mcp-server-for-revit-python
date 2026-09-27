@@ -75,14 +75,16 @@
                              Content="Todo el modelo"/>
                 <Grid Margin="0,2,0,4">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="130"/>
+                        <ColumnDefinition Width="150"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <RadioButton x:Name="rb_scope_level" GroupName="scope" Grid.Column="0" VerticalAlignment="Center"
-                                 Content="Por nivel"/>
+                                 Content="Por nivel (vaciado)"/>
                     <ComboBox x:Name="cbo_scope_level" Grid.Column="1" VerticalAlignment="Center"
                               IsEnabled="{Binding IsChecked, ElementName=rb_scope_level}"/>
                 </Grid>
+                <TextBlock TextWrapping="Wrap" Margin="20,0,0,4" Foreground="Gray" FontSize="11"
+                           Text="Agrupa como el vaciado en obra: vigas, losas y cimentacion de ese nivel, mas las columnas, muros y escaleras que llegan a el desde el nivel de abajo."/>
                 <RadioButton x:Name="rb_scope_pick" GroupName="scope" Margin="0,2,0,2"
                              Content="Seleccionar elementos en el modelo"/>
                 <TextBlock TextWrapping="Wrap" Margin="20,2,0,0" Foreground="Gray" FontSize="11"

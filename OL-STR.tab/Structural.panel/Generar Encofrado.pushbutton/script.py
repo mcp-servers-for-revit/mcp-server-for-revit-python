@@ -230,9 +230,9 @@ else:
             elements_by_category[key] = [
                 e
                 for e in elements_by_category[key]
-                if fw_geom.element_level_id(e, levels) == level.Id
+                if fw_geom.element_pour_level_id(e, key, levels) == level.Id
             ]
-        scope_label = u"nivel {}".format(level.Name)
+        scope_label = u"vaciado del nivel {}".format(level.Name)
         empty_message = u"No hay elementos de las categorias marcadas en el nivel {}.".format(
             level.Name
         )
