@@ -1620,8 +1620,6 @@ def process_formwork(
                 candidate.element,
                 {
                     "EF_Area_Encofrado_m2": classification["included_area_m2"],
-                    "EF_Area_Contacto_m2": classification["excluded_contact_area_m2"],
-                    "EF_Area_Contra_Terreno_m2": classification["excluded_soil_area_m2"],
                     "EF_Paneles": element_panels,
                     "EF_Material_Encofrado": formwork_material or "",
                 },

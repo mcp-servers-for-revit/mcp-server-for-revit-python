@@ -50,11 +50,28 @@ STRUCTURAL_CATEGORIES = [
 # with the panels.
 ELEMENT_RESULT_PARAMS = [
     ("EF_Area_Encofrado_m2", False),
-    ("EF_Area_Contacto_m2", False),
-    ("EF_Area_Contra_Terreno_m2", False),
     ("EF_Paneles", INTEGER),
     ("EF_Material_Encofrado", True),
 ]
+
+# Element parameters earlier versions created and no longer use: their
+# bindings are removed from the project on the next run.
+OBSOLETE_ELEMENT_PARAMS = ["EF_Area_Contacto_m2", "EF_Area_Contra_Terreno_m2"]
+
+
+def remove_obsolete_parameters(doc):
+    """Unbind OBSOLETE_ELEMENT_PARAMS from the project (their values go
+    with them). Must run inside an active Transaction. Returns the names
+    removed."""
+    binding_map = doc.ParameterBindings
+    found = []
+    iterator = binding_map.ForwardIterator()
+    while iterator.MoveNext():
+        if iterator.Key.Name in OBSOLETE_ELEMENT_PARAMS:
+            found.append(iterator.Key)
+    for definition in found:
+        binding_map.Remove(definition)
+    return [d.Name for d in found]
 
 _FILE_HEADER = (
     "# This is a Revit shared parameter file.\n"
@@ -202,5 +219,10 @@ def ensure_shared_parameters(doc):
 
     if previous_file:
         app.SharedParametersFilename = previous_file
+
+    try:
+        remove_obsolete_parameters(doc)
+    except Exception as e:
+        warnings.append("No se pudieron quitar parametros obsoletos: {}".format(str(e)))
 
     return warnings
