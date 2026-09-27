@@ -97,9 +97,9 @@ class TestDrawing:
         from revit_mcp.rebar_spec import auto_design, stirrup_centerline
 
         design = auto_design(0.30, 0.60, 0.04, '3/8"', parse_longitudinal("8 5/8"))
-        kind, poly = design["stirrups"][0]
+        kind, poly, wrap = design["stirrups"][0]
         assert kind == "borde"
-        line = stirrup_centerline(poly, design["bars"], '3/8"')
+        line = stirrup_centerline(poly, design["bars"], '3/8"', wrap)
         xs = [x for x, _ in line]
         # stirrup centerline sits cover + half the stirrup inside the face
         assert max(xs) == pytest.approx(0.15 - 0.04 - 0.009525 / 2)
@@ -124,11 +124,12 @@ class TestDrawing:
 
         design = empty_design()
         design["bars"] = [(0.1, -0.2, '3/4"')]
-        design["stirrups"] = [("confinamiento", [(0, 0), (0.1, 0), (0.1, 0.1)])]
+        design["stirrups"] = [("confinamiento", [(0, 0), (0.1, 0), (0.1, 0.1)], 0.008)]
         design["ties"] = [("borde", (0, 0), (0.1, 0.1))]
         again = design_from_text(design_to_text(design))
         assert again["bars"] == [(0.1, -0.2, '3/4"')]
         assert again["stirrups"][0][0] == "confinamiento"
+        assert again["stirrups"][0][2] == pytest.approx(0.008)
         assert again["ties"][0][0] == "borde"
         assert design_to_text(empty_design()) == ""
         assert design_from_text("") is None
@@ -186,3 +187,35 @@ class TestAutoTie:
 
         with pytest.raises(SpecError):
             auto_tie((0, 0), [(0, 0, '5/8"'), (0.1, 0.2, '5/8"')])
+
+
+class TestMeasures:
+    section = [(-0.15, -0.40), (0.15, -0.40), (0.15, 0.40), (-0.15, 0.40)]
+
+    def test_perimeter_stirrup_measures_the_cover(self):
+        from revit_mcp.rebar_spec import auto_design, rect_measures, stirrup_outline
+
+        design = auto_design(0.30, 0.80, 0.04, '3/8"', parse_longitudinal("8 5/8"))
+        kind, poly, wrap = design["stirrups"][0]
+        width, height, left, bottom = rect_measures(
+            stirrup_outline(poly, design["bars"], '3/8"', wrap), self.section)
+        assert (width, height) == (pytest.approx(0.22), pytest.approx(0.72))
+        assert (left, bottom) == (pytest.approx(0.04), pytest.approx(0.04))
+
+    def test_edit_roundtrip(self):
+        from revit_mcp.rebar_spec import rect_from_measures, rect_measures, stirrup_outline
+
+        pts = rect_from_measures(0.20, 0.30, 0.05, 0.25, self.section, '3/8"', 0.008)
+        got = rect_measures(stirrup_outline(pts, [], '3/8"', 0.008), self.section)
+        assert got == (pytest.approx(0.20), pytest.approx(0.30), pytest.approx(0.05), pytest.approx(0.25))
+
+    def test_not_a_rectangle(self):
+        from revit_mcp.rebar_spec import rect_measures
+
+        assert rect_measures([(0, 0), (1, 0), (0.9, 1), (0.1, 1)], self.section) is None
+
+    def test_too_small(self):
+        from revit_mcp.rebar_spec import rect_from_measures
+
+        with pytest.raises(SpecError):
+            rect_from_measures(0.02, 0.30, 0.05, 0.05, self.section, '3/8"', 0.008)

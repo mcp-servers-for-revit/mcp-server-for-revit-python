@@ -202,7 +202,7 @@ class ColumnSpec(object):
             raise spec.SpecError(u"dibuja las barras longitudinales de la seccion (o usa Automatico)")
         if not self.design["stirrups"]:
             raise spec.SpecError(u"dibuja al menos el estribo de borde")
-        kinds = [k for k, _ in self.design["stirrups"]] + [t[0] for t in self.design["ties"]]
+        kinds = [st[0] for st in self.design["stirrups"]] + [t[0] for t in self.design["ties"]]
         if spec.KIND_CONFINEMENT in kinds and self.confinement is None:
             raise spec.SpecError(
                 u"el dibujo tiene estribos o grapas de confinamiento: falta su diametro y distribucion"
@@ -458,10 +458,10 @@ def generate_column(doc, column, column_spec, bar_types, hooks, mark):
     z_clear_top = clear_top(doc, column, section)
     # (kind, family, [loop centerlines], [tie centerlines]) per family
     groups = {}
-    for drawn_kind, poly in design["stirrups"]:
+    for drawn_kind, poly, wrap in design["stirrups"]:
         kind, family = column_spec.family_of(drawn_kind)
         entry = groups.setdefault(kind, (family, [], []))
-        entry[1].append(spec.stirrup_centerline(poly, design["bars"], family.key))
+        entry[1].append(spec.stirrup_centerline(poly, design["bars"], family.key, wrap))
     for drawn_kind, a, b in design["ties"]:
         kind, family = column_spec.family_of(drawn_kind)
         entry = groups.setdefault(kind, (family, [], []))

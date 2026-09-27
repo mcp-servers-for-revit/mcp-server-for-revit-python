@@ -269,8 +269,11 @@ def design_to_text(design):
         "v": DESIGN_VERSION,
         "bars": [[r(x), r(y), key] for x, y, key in design.get("bars", [])],
         "stirrups": [
-            {"k": kind, "p": [[r(x), r(y)] for x, y in poly]}
-            for kind, poly in design.get("stirrups", [])
+            dict(
+                [("k", kind), ("p", [[r(x), r(y)] for x, y in poly])]
+                + ([("r", r(wrap))] if wrap is not None else [])
+            )
+            for kind, poly, wrap in design.get("stirrups", [])
         ],
         "ties": [
             {"k": kind, "p": [[r(a[0]), r(a[1])], [r(b[0]), r(b[1])]]}
@@ -308,16 +311,18 @@ def design_from_text(text):
             design["bars"].append((float(x), float(y), key))
         for entry in data.get("stirrups", []):
             kind, points = _kind_and_points(entry, None)
+            wrap = entry.get("r") if isinstance(entry, dict) else None
             if len(points) >= 3:
-                design["stirrups"].append((kind, points))
+                design["stirrups"].append((kind, points, None if wrap is None else float(wrap)))
         for entry in data.get("ties", []):
             kind, points = _kind_and_points(entry, KIND_CONFINEMENT)
             if len(points) == 2:
                 design["ties"].append((kind, points[0], points[1]))
         # Stirrups of the first format: perimeter ones are edge stirrups.
         design["stirrups"] = [
-            (kind or (KIND_EDGE if is_edge_stirrup(poly, design["bars"]) else KIND_CONFINEMENT), poly)
-            for kind, poly in design["stirrups"]
+            (kind or (KIND_EDGE if is_edge_stirrup(poly, design["bars"]) else KIND_CONFINEMENT),
+             poly, wrap)
+            for kind, poly, wrap in design["stirrups"]
         ]
         return design
     except (ValueError, TypeError, KeyError, AttributeError):
@@ -406,12 +411,65 @@ def _bar_at(point, bars, tol=0.005):
     return None
 
 
-def stirrup_centerline(vertices, bars, stirrup_key):
-    """Centerline of a stirrup drawn through bar centers: pushed outward
-    by the wrapped bar radius plus half the stirrup diameter."""
-    ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
+def wrap_radius(vertices, bars):
+    """Radius of the largest bar a stirrup drawn through `vertices` wraps
+    (0 when its corners aren't on bars)."""
     radii = [BAR_DIAMETERS_MM[k] / 2000.0 for k in (_bar_at(v, bars) for v in vertices) if k]
-    return offset_polygon_outward(vertices, (max(radii) if radii else 0.0) + ds / 2.0)
+    return max(radii) if radii else 0.0
+
+
+def stirrup_centerline(vertices, bars, stirrup_key, wrap=None):
+    """Centerline of a stirrup drawn through bar centers: pushed outward
+    by the wrapped bar radius (`wrap`, stored with the stirrup so editing
+    its measures can't change it; computed from the bars when None) plus
+    half the stirrup diameter."""
+    ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
+    if wrap is None:
+        wrap = wrap_radius(vertices, bars)
+    return offset_polygon_outward(vertices, wrap + ds / 2.0)
+
+
+def stirrup_outline(vertices, bars, stirrup_key, wrap=None):
+    """Outer face of the stirrup (its measured size)."""
+    ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
+    if wrap is None:
+        wrap = wrap_radius(vertices, bars)
+    return offset_polygon_outward(vertices, wrap + ds)
+
+
+def side_lengths(polygon):
+    n = len(polygon)
+    return [math.hypot(polygon[(k + 1) % n][0] - polygon[k][0], polygon[(k + 1) % n][1] - polygon[k][1])
+            for k in range(n)]
+
+
+def rect_measures(outline, section_polygon, tol=1e-4):
+    """(width, height, to_left_face, to_bottom_face) of an axis-aligned
+    rectangular stirrup outline, measured from the section's bounding
+    faces; None for any other shape."""
+    if len(outline) != 4:
+        return None
+    xs = sorted(set(round(x, 6) for x, _ in outline))
+    ys = sorted(set(round(y, 6) for _, y in outline))
+    if len(xs) != 2 or len(ys) != 2 or xs[1] - xs[0] < tol or ys[1] - ys[0] < tol:
+        return None
+    left = min(x for x, _ in section_polygon)
+    bottom = min(y for _, y in section_polygon)
+    return xs[1] - xs[0], ys[1] - ys[0], xs[0] - left, ys[0] - bottom
+
+
+def rect_from_measures(width, height, to_left, to_bottom, section_polygon, stirrup_key, wrap):
+    """Vertices (bar-center rectangle, as drawn) of a rectangular stirrup
+    whose outer face measures width x height at the given distances from
+    the section's left and bottom faces."""
+    inset = wrap + BAR_DIAMETERS_MM[stirrup_key] / 1000.0
+    if width <= 2 * inset + 0.01 or height <= 2 * inset + 0.01:
+        raise SpecError(u"Medidas demasiado pequenas para ese diametro")
+    x0 = min(x for x, _ in section_polygon) + to_left + inset
+    y0 = min(y for _, y in section_polygon) + to_bottom + inset
+    x1 = x0 + width - 2 * inset
+    y1 = y0 + height - 2 * inset
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
 
 
 def tie_centerline(start, end, bars, stirrup_key):
@@ -436,7 +494,8 @@ def auto_design(b, h, cover, stirrup_key, groups):
     bars = layout_rectangular_bars(b, h, cover, ds, groups)
     design = empty_design()
     design["bars"] = [(x, y, k) for x, y, k in bars]
-    design["stirrups"] = [(KIND_EDGE, [(x, y) for x, y, _ in bars[:4]])]
+    corners = [(x, y) for x, y, _ in bars[:4]]
+    design["stirrups"] = [(KIND_EDGE, corners, wrap_radius(corners, design["bars"]))]
     return design
 
 

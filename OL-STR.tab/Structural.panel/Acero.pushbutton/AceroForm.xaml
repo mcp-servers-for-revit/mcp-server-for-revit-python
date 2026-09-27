@@ -98,10 +98,26 @@
                     <TextBlock Text="Boceto: " FontWeight="Bold" VerticalAlignment="Center"/>
                     <RadioButton x:Name="rb_stirrup" GroupName="tool" Content="Estribo" IsChecked="True" Margin="4,0,8,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
+                    <RadioButton x:Name="rb_rect" GroupName="tool" Margin="0,0,8,0" VerticalAlignment="Center"
+                                 Checked="tool_changed"
+                                 ToolTip="Estribo rectangular: clic en dos esquinas opuestas (se ajustan a las barras y a 1 cm).">
+                        <StackPanel Orientation="Horizontal">
+                            <Canvas Width="18" Height="18" Margin="0,0,4,0">
+                                <Rectangle Canvas.Left="2" Canvas.Top="2" Width="14" Height="14"
+                                           Stroke="#FF5A5A5A" StrokeThickness="1.5"/>
+                                <Rectangle Canvas.Left="0" Canvas.Top="0" Width="5" Height="5" Fill="#FF2F7FE0"/>
+                                <Rectangle Canvas.Left="13" Canvas.Top="13" Width="5" Height="5" Fill="#FF2F7FE0"/>
+                            </Canvas>
+                            <TextBlock Text="Mediante dos puntos" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </RadioButton>
                     <RadioButton x:Name="rb_tie" GroupName="tool" Content="Grapa" Margin="0,0,8,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
                     <RadioButton x:Name="rb_bar" GroupName="tool" Content="Barra" Margin="0,0,8,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
+                    <RadioButton x:Name="rb_edit" GroupName="tool" Content="Editar" Margin="0,0,8,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"
+                                 ToolTip="Clic en un estribo para ver y cambiar sus medidas y su tipo (borde/confinamiento)."/>
                     <RadioButton x:Name="rb_erase" GroupName="tool" Content="Borrar" Margin="0,0,16,0"
                                  VerticalAlignment="Center" Checked="tool_changed"/>
                     <TextBlock Text="&#216; acero: " VerticalAlignment="Center"/>
@@ -117,8 +133,28 @@
                     <Button Content="Autom&#225;tico" Width="85" Click="auto_click"
                             ToolTip="Reparte esas barras y dibuja el estribo de borde (solo secciones rectangulares)."/>
                 </WrapPanel>
+                <!-- Measures of the selected stirrup (outer face, cm) -->
+                <Border DockPanel.Dock="Top" x:Name="panel_measures" Visibility="Collapsed" Margin="0,0,0,4"
+                        Padding="6,4,6,4" Background="#FFEAF2FC" BorderBrush="#FF9DBEE8" BorderThickness="1">
+                    <WrapPanel>
+                        <TextBlock x:Name="txt_measures_title" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0"
+                                   Text="Estribo seleccionado - medidas exteriores (cm):"/>
+                        <StackPanel x:Name="panel_rect_fields" Orientation="Horizontal">
+                            <TextBlock Text="Ancho " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_m_width" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
+                            <TextBlock Text="Alto " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_m_height" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
+                            <TextBlock Text="A cara izq. " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_m_left" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
+                            <TextBlock Text="A cara inf. " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_m_bottom" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
+                            <Button Content="Aplicar" Width="65" Click="measures_apply"/>
+                        </StackPanel>
+                        <TextBlock x:Name="txt_m_sides" VerticalAlignment="Center" Foreground="#FF404040"/>
+                    </WrapPanel>
+                </Border>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
-                           Text="Estribo: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barra: clic donde va. Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
+                           Text="Estribo: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barra: clic donde va. Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
                 <Border BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White" ClipToBounds="True">
                     <Canvas x:Name="canvas" Background="White"
                             MouseLeftButtonDown="canvas_left" MouseRightButtonDown="canvas_right"
