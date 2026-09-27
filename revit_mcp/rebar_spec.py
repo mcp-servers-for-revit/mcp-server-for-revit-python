@@ -948,24 +948,28 @@ def fit_polyline_to_box(points, box):
     return [(along(x, min(xs), w, x0, x1), along(y, min(ys), h, y0, y1)) for x, y in points]
 
 
-STIRRUP_MERGE_GAP = 0.01  # the two middle stirrups closer than this are one
+STIRRUP_MERGE_GAP = 0.01  # two stirrups closer than this are one
 
 
-def stirrup_zone_positions(length, zones, rest):
-    """Stirrups along a clear length, each tagged with its zone:
-    [(offset, zone_index)], zone_index being the position in `zones`
-    ("1@.05" -> 0, "6@.10" -> 1...) or len(zones) for the rest. Laid out
-    from each end towards the middle with the spacings as written ('1@.05,
-    5@.10, rto@.20': 0.05, then 5 at 0.10, then every 0.20), the two ends
-    mirroring each other; in the middle no gap is wider than the rest
-    spacing (one more stirrup at the middle when needed) and two stirrups
-    only merge when they practically coincide."""
+def stirrup_sets(length, zones, rest):
+    """The stirrup sets of a clear length, in order from the bottom, as
+    they are placed on site ('1@.05, 5@.10, rto@.20'):
+    - at each end every zone is its own set, measured from that end: 1
+      stirrup at 0.05 (a single one), then 5 at 0.10 counted from it
+      (0.15 ... 0.55); the top zones mirror the bottom ones;
+    - the rest is one set in the middle, every `rest` from the last stirrup
+      of the bottom zones up to the top zones (the last gap, before them,
+      the leftover).
+    Zones that don't fit in a short column stop at its middle.
+    Returns [(start, count, spacing, zone_index, side)]: zone_index the
+    position in `zones` or len(zones) for the rest; side +1 for the bottom
+    zones and the rest, -1 for the top zones (see rc._runs)."""
     if length <= 0:
         return []
     rest_zone = len(zones)
     half = length / 2.0
     eps = 1e-6
-    bottom = []
+    bottom = []  # [(offset, zone)] of the bottom end zones, up to the middle
     z = 0.0
     for index, (count, spacing) in enumerate(zones):
         for _ in range(count):
@@ -973,21 +977,45 @@ def stirrup_zone_positions(length, zones, rest):
                 break
             z += spacing
             bottom.append((z, index))
-    while z + rest <= half + eps:
-        z += rest
-        bottom.append((z, rest_zone))
-    if not bottom:
-        return [(half, rest_zone)]
     top = [(length - p, zone) for p, zone in reversed(bottom)]
-    gap = top[0][0] - bottom[-1][0]
-    if gap < STIRRUP_MERGE_GAP:
-        # the two halves meet on (almost) the same spot: one stirrup there
-        bottom, top, middle = bottom[:-1], top[1:], [(half, bottom[-1][1])]
-    elif gap > rest + eps:
-        middle = [(half, rest_zone)]
-    else:
-        middle = []
-    return bottom + middle + top
+    if bottom and top[0][0] - bottom[-1][0] < STIRRUP_MERGE_GAP:
+        top = top[1:]  # both ends reach the same middle spot: one stirrup there
+    low = bottom[-1][0] if bottom else 0.0
+    high = top[0][0] if top else length
+    middle = []
+    z = low + rest
+    while z < high - STIRRUP_MERGE_GAP:
+        middle.append(z)
+        z += rest
+    if not bottom and not middle:
+        middle = [half]
+
+    sets = []
+
+    def add_zones(items, side):
+        i = 0
+        while i < len(items):
+            j = i
+            while j + 1 < len(items) and items[j + 1][1] == items[i][1]:
+                j += 1
+            points = [p for p, _ in items[i:j + 1]]
+            spacing = points[1] - points[0] if len(points) > 1 else 0.0
+            sets.append((points[0], len(points), spacing, items[i][1], side))
+            i = j + 1
+
+    add_zones(bottom, 1)
+    if middle:
+        sets.append((middle[0], len(middle), rest if len(middle) > 1 else 0.0, rest_zone, 1))
+    add_zones(top, -1)
+    return sets
+
+
+def stirrup_zone_positions(length, zones, rest):
+    """Every stirrup of `stirrup_sets`, bottom up, tagged with its zone:
+    [(offset, zone_index)]."""
+    return [(start + k * spacing, zone)
+            for start, count, spacing, zone, _ in stirrup_sets(length, zones, rest)
+            for k in range(count)]
 
 
 # --- Custom longitudinal bars, seated against the stirrup ---------------------

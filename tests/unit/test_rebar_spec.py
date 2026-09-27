@@ -47,24 +47,49 @@ class TestParsing:
 
 
 class TestStirrups:
-    def test_symmetric_from_both_ends(self):
+    def test_end_zones_mirror_each_other(self):
         pos = stirrup_positions(2.65, [(1, 0.05), (10, 0.10)], 0.20)
         assert len(pos) == 24
         assert pos[0] == pytest.approx(0.05)
         assert pos[-1] == pytest.approx(2.60)
-        for a, b in zip(pos, reversed(pos)):
+        for a, b in zip(pos[:11], reversed(pos[-11:])):
             assert a + b == pytest.approx(2.65)
 
-    @pytest.mark.parametrize("length", [4.0, 2.5, 3.25, 2.4, 4.65, 3.4, 1.95, 2.05])
+    def test_one_set_per_zone_and_end_as_written(self):
+        from revit_mcp.rebar_spec import stirrup_sets
+
+        sets = stirrup_sets(4.0, [(1, 0.05), (5, 0.10)], 0.20)
+        expected = [
+            (0.05, 1, 0.0, 0, 1),     # 1@0.05: a single stirrup
+            (0.15, 5, 0.10, 1, 1),    # 5@0.10 counted from it
+            (0.75, 14, 0.20, 2, 1),   # rto@0.20 from the last of 5@0.10 (0.75 ... 3.35)
+            (3.45, 5, 0.10, 1, -1),   # 5@0.10 at the top (3.45 ... 3.85)
+            (3.95, 1, 0.0, 0, -1),    # 1@0.05 under the beam
+        ]
+        assert len(sets) == len(expected)
+        for got, want in zip(sets, expected):
+            assert got[:3] == pytest.approx(want[:3]) and got[3:] == want[3:]
+
+    @pytest.mark.parametrize("length", [4.0, 2.5, 3.25, 2.4, 4.65, 3.4, 2.1, 1.95, 2.05])
     def test_each_end_as_written_and_no_gap_over_the_rest(self, length):
+        from revit_mcp.rebar_spec import STIRRUP_MERGE_GAP
+
         zones, rest = [(1, 0.05), (5, 0.10)], 0.20
         pos = stirrup_positions(length, zones, rest)
         ends = [0.05, 0.15, 0.25, 0.35, 0.45, 0.55]
         assert pos[:6] == pytest.approx(ends)  # from the bottom
         assert [length - p for p in reversed(pos)][:6] == pytest.approx(ends)  # from the top
         gaps = [b - a for a, b in zip(pos, pos[1:])]
-        assert max(gaps) <= rest + 1e-9
-        assert min(gaps) >= 0.01 - 1e-9  # two stirrups never on the same spot
+        assert max(gaps) <= rest + STIRRUP_MERGE_GAP + 1e-9
+        assert min(gaps) >= STIRRUP_MERGE_GAP - 1e-9  # two stirrups never on the same spot
+        # the rest runs every 0.20 from the last stirrup of 5@0.10
+        middle = [p for p in pos if 0.55 + 1e-6 < p < length - 0.55 - 1e-6]
+        for k, p in enumerate(middle):
+            assert p == pytest.approx(0.55 + 0.20 * (k + 1))
+
+    def test_short_column_zones_stop_at_the_middle(self):
+        pos = stirrup_positions(0.9, [(1, 0.05), (5, 0.10)], 0.20)
+        assert pos == pytest.approx([0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85])
 
     def test_runs_of_constant_spacing(self):
         pos = stirrup_positions(2.65, [(1, 0.05), (10, 0.10)], 0.20)

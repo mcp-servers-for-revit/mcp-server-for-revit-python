@@ -534,18 +534,17 @@ def _tag(rebar, column):
 
 def _runs(family, joint_spacing_m, section, z_clear_top):
     """(z_start_ft, count, spacing_ft, side) runs of one stirrup family: its
-    clear-height distribution, plus the joint when EA_Nucleo_cm is set.
-    side is +1 in the lower half, -1 in the upper half: the way stirrups
-    set at one height stack (towards the middle, so the first one keeps
-    its distance from each end)."""
+    clear-height distribution, one rebar set per zone and end as written
+    (spec.stirrup_sets: '1@.05' a single stirrup, '5@.10' a set of 5 at
+    0.10, the rest one set in the middle), plus the joint when EA_Nucleo_cm
+    is set. side is -1 for the top end zones: the way stirrups set at one
+    height stack (towards the middle, so the first one keeps its distance
+    from each end)."""
     clear_m = (z_clear_top - section.z_bottom) * FT
-    positions = spec.stirrup_positions(clear_m, family.zones, family.rest)
-    lower = [p for p in positions if p <= clear_m / 2.0 + 1e-6]
-    upper = [p for p in positions if p > clear_m / 2.0 + 1e-6]
-    runs = []
-    for part, side in ((lower, 1), (upper, -1)):
-        for start, n, spacing in spec.group_runs(part):
-            runs.append((section.z_bottom + start / FT, n, spacing / FT, side))
+    runs = [
+        (section.z_bottom + start / FT, n, spacing / FT, side)
+        for start, n, spacing, _, side in spec.stirrup_sets(clear_m, family.zones, family.rest)
+    ]
     if joint_spacing_m and section.z_top - z_clear_top > 0.1 / FT:
         joint = spec.joint_positions((section.z_top - z_clear_top) * FT, joint_spacing_m)
         for start, n, spacing in spec.group_runs(joint):

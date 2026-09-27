@@ -1301,8 +1301,10 @@ class AceroWindow(forms.WPFWindow):
                         closed = not is_open
                 except rs.SpecError:
                     continue
-                # stacked towards the middle, like rc._runs
-                zs = ([dz + z + (lift if z <= clear / 2.0 + 1e-6 else -lift) for z, _ in family["tagged"]]
+                # stacked towards the middle, like rc._runs (down in the top zones)
+                rest_zone = len(family["zones"])
+                zs = ([dz + z + (-lift if zone != rest_zone and z > clear / 2.0 else lift)
+                       for z, zone in family["tagged"]]
                       + [dz + lift + clear + j for j in joint])
                 loops.append((kind, [(x + dx, y + dy) for x, y in line], closed, zs,
                               rs.BAR_DIAMETERS_MM[family["key"]] / 2000.0))
