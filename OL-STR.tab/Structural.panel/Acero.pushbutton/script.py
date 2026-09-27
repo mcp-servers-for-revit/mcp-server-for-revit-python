@@ -38,7 +38,8 @@ from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
 from System.Collections.Generic import List
 from System.Windows import Point, Size, Thickness, VerticalAlignment, Visibility
 from System.Windows.Input import Key
-from System.Windows.Controls import Canvas, CheckBox, ListBoxItem, Orientation, StackPanel, TextBlock
+from System.Windows.Controls import (Button, Canvas, CheckBox, ListBoxItem, Orientation, StackPanel,
+                                     TextBlock, TextBox)
 from System.Windows.Media import Color, DoubleCollection, PointCollection, SolidColorBrush
 from System.Windows.Shapes import Ellipse, Line, Polygon, Polyline
 
@@ -794,6 +795,7 @@ class AceroWindow(forms.WPFWindow):
         self.txt_measures_title.Text = u"Estribo {}de {} seleccionado - medidas exteriores (cm):".format(
             u"abierto " if is_open else u"", u"borde" if kind == rs.KIND_EDGE else u"confinamiento")
         measures = None if is_open else rs.rect_measures(outline, section.polygon_m)
+        self._fill_segment_boxes(rs.side_lengths(outline, closed=False) if is_open else [])
         if measures:
             self.panel_rect_fields.Visibility = Visibility.Visible
             for box, value in zip((self.txt_m_width, self.txt_m_height), measures[:2]):
@@ -801,9 +803,74 @@ class AceroWindow(forms.WPFWindow):
             self.txt_m_sides.Text = u""
         else:
             self.panel_rect_fields.Visibility = Visibility.Collapsed
-            sides = (rs.side_lengths(outline, closed=False) if is_open
-                     else rs.side_lengths(rs.counterclockwise(outline)))
-            self.txt_m_sides.Text = u"Tramos: " + u"  ·  ".join(u"{:.1f}".format(v * 100) for v in sides)
+            # Open stirrups edit their segments in boxes; other shapes
+            # just list their sides.
+            self.txt_m_sides.Text = u"" if is_open else u"Lados: " + u"  ·  ".join(
+                u"{:.1f}".format(v * 100) for v in rs.side_lengths(rs.counterclockwise(outline)))
+
+    def _fill_segment_boxes(self, lengths):
+        """One editable box per segment of an open stirrup (outer face, cm)."""
+        self.panel_segments.Children.Clear()
+        self.segment_boxes = []
+        if not lengths:
+            return
+        label = TextBlock()
+        label.Text = u"Tramos: "
+        label.VerticalAlignment = VerticalAlignment.Center
+        self.panel_segments.Children.Add(label)
+        for value in lengths:
+            box = TextBox()
+            box.Width = 46
+            box.Margin = Thickness(0, 0, 4, 0)
+            box.Text = u"{:.1f}".format(value * 100)
+            box.KeyDown += self.segment_key
+            self.panel_segments.Children.Add(box)
+            self.segment_boxes.append(box)
+        button = Button()
+        button.Content = u"Aplicar"
+        button.Width = 65
+        button.Margin = Thickness(4, 0, 0, 0)
+        button.Click += self.segments_apply
+        self.panel_segments.Children.Add(button)
+
+    def segment_key(self, sender, args):
+        if args.Key == Key.Enter:
+            self.segments_apply(sender, args)
+
+    def segments_apply(self, sender, args):
+        """Resize the open stirrup's segments to the typed outer lengths."""
+        if self.selected is None:
+            return
+        kind, poly, wrap, is_open = self.design["stirrups"][self.selected]
+        if not is_open:
+            return
+        key = self._family_key(kind)
+        if wrap is None:
+            wrap = rs.wrap_radius(poly, self.design["bars"])
+        try:
+            current = rs.side_lengths(rs.stirrup_outline(poly, self.design["bars"], key, wrap, True),
+                                      closed=False)
+            wanted = [float((box.Text or u"").replace(u",", u".")) / 100.0 for box in self.segment_boxes]
+            if len(wanted) != len(current) or min(wanted) <= 0:
+                raise ValueError()
+            pts = list(poly)
+            for index, (now, new) in enumerate(zip(current, wanted)):
+                if abs(new - now) > 0.0005:
+                    pts = rs.resize_segment(pts, index, new - now)
+        except ValueError:
+            forms.alert(u"Escribe los tramos en cm (ej. 7.5).", title="Acero")
+            return
+        except rs.SpecError as e:
+            forms.alert(u"{}".format(e), title="Acero")
+            return
+        if self._outside_cover(kind, pts, wrap, True):
+            self._status(u"Con esas medidas el estribo se sale del recubrimiento; no se aplicaron.")
+            return
+        self._status()
+        self._push_undo()
+        self.design["stirrups"][self.selected] = (kind, pts, wrap, True)
+        self.redraw()
+        self._update_measures()
 
     def measures_apply(self, sender, args):
         t = self.by_id.get(self.state.active)

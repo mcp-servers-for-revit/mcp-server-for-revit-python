@@ -322,3 +322,34 @@ def test_clean_polyline():
     assert clean_polyline(straight, closed=False) == [(0, 0), (0, 0.2), (0.1, 0.2)]
     square = [(0, 0), (0.05, 0), (0.1, 0), (0.1, 0.1), (0, 0.1), (0, 0)]
     assert clean_polyline(square, closed=True) == [(0, 0), (0.1, 0), (0.1, 0.1), (0, 0.1)]
+
+
+class TestResizeSegment:
+    # bracket: leg, chamfer, back, chamfer, leg (like the user's drawing)
+    pts = [(0.03, 0.30), (-0.01, 0.30), (-0.05, 0.26), (-0.05, -0.26), (-0.01, -0.30), (0.03, -0.30)]
+
+    def test_outer_measure_changes_by_the_same_amount(self):
+        from revit_mcp.rebar_spec import resize_segment, side_lengths, stirrup_outline
+
+        before = side_lengths(stirrup_outline(self.pts, [], '3/8"', 0.0, True), closed=False)
+        new = resize_segment(self.pts, 2, 0.10)  # back 10 cm longer
+        after = side_lengths(stirrup_outline(new, [], '3/8"', 0.0, True), closed=False)
+        assert after[2] == pytest.approx(before[2] + 0.10)
+        for k in (0, 1, 3, 4):  # the others keep their size (angles kept)
+            assert after[k] == pytest.approx(before[k])
+
+    def test_too_short(self):
+        from revit_mcp.rebar_spec import resize_segment
+
+        with pytest.raises(SpecError):
+            resize_segment(self.pts, 0, -0.05)
+
+
+def test_legs_grow_from_their_free_end():
+    from revit_mcp.rebar_spec import resize_segment
+
+    pts = TestResizeSegment.pts
+    first = resize_segment(pts, 0, 0.05)
+    assert first[0] == pytest.approx((0.08, 0.30)) and first[1:] == pts[1:]
+    last = resize_segment(pts, len(pts) - 2, 0.05)
+    assert last[:-1] == pts[:-1] and last[-1] == pytest.approx((0.08, -0.30))

@@ -716,3 +716,19 @@ def clean_polyline(points, closed, tol=1e-4):
                 changed = True
                 break
     return pts
+
+
+def resize_segment(points, index, delta):
+    """Lengthen (delta > 0) or shorten segment `index` of an open stirrup
+    along its own direction, keeping all angles (chamfers, jogs). The first
+    segment grows from its free end (the start point moves back); any
+    other one pushes every point after it. Returns the new points."""
+    pts = list(points)
+    (x1, y1), (x2, y2) = pts[index], pts[index + 1]
+    length = math.hypot(x2 - x1, y2 - y1)
+    if length + delta < 0.005:
+        raise SpecError(u"El tramo {} quedaria demasiado corto".format(index + 1))
+    ux, uy = (x2 - x1) / length, (y2 - y1) / length
+    if index == 0 and len(pts) > 2:
+        return [(x1 - ux * delta, y1 - uy * delta)] + pts[1:]
+    return pts[:index + 1] + [(x + ux * delta, y + uy * delta) for x, y in pts[index + 1:]]
