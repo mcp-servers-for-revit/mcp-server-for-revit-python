@@ -1915,8 +1915,8 @@ output.print_md("| **Total** | | **{:.2f}** | **{:.2f}** | **{:.2f}** | **{:.2f}
 
 output.print_md(
     "\n*Longitudinales rectas de piso a piso (sin empalmes ni anclajes). "
-    "Estribos en la luz libre, hasta el fondo de la viga o losa superior "
-    "(y en el nucleo si se configuro).*"
+    "Estribos en la luz libre, distribuidos desde cada extremo: hasta la cara inferior "
+    "de la losa superior (o de la viga si no hay losa); en el nucleo si se configuro.*"
 )
 for type_name in sorted(stick_out):
     warnings.append(

@@ -443,8 +443,10 @@ class Section(object):
 
 
 def clear_top(doc, column, section):
-    """Underside of the deepest beam/slab framing into the column top, or
-    the column top when nothing frames into it."""
+    """Top of the column's clear height, where its stirrup distribution
+    ends: the underside of the slab over it - also when beams frame in (the
+    user's rule: the slab's thickness is the joint) -, else the underside of
+    the deepest beam, else the column top."""
     bb = column.get_BoundingBox(None)
     if bb is None:
         return section.z_top
@@ -454,19 +456,21 @@ def clear_top(doc, column, section):
         DB.XYZ(bb.Max.X + reach, bb.Max.Y + reach, section.z_top + 0.01),
     )
     mid = (section.z_bottom + section.z_top) / 2.0
-    best = section.z_top
-    for bic in (DB.BuiltInCategory.OST_StructuralFraming, DB.BuiltInCategory.OST_Floors):
-        framing = (
+    for bic in (DB.BuiltInCategory.OST_Floors, DB.BuiltInCategory.OST_StructuralFraming):
+        best = section.z_top
+        found = (
             DB.FilteredElementCollector(doc)
             .OfCategory(bic)
             .WhereElementIsNotElementType()
             .WherePasses(DB.BoundingBoxIntersectsFilter(outline))
         )
-        for e in framing:
+        for e in found:
             ebb = e.get_BoundingBox(None)
             if ebb is not None and mid < ebb.Min.Z < best:
                 best = ebb.Min.Z
-    return best
+        if best < section.z_top:
+            return best
+    return section.z_top
 
 
 def delete_generated(doc, column):
