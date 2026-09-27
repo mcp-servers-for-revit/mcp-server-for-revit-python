@@ -862,3 +862,68 @@ def stirrup_zone_positions(length, zones, rest):
     else:
         middle = []
     return bottom + middle + top
+
+
+# --- Custom longitudinal bars, seated against the stirrup ---------------------
+
+BAR_SEAT_SNAP = 0.03  # a bar clicked this close to a stirrup sits against it
+
+
+def custom_bar_layout(inner, corner_key, face_x, face_y):
+    """Bars of a rectangular section laid against a stirrup's inner face.
+    `inner` = (x0, y0, x1, y1) of that face; corner bars (corner_key) sit
+    in its corners; face_x = (count, key) bars on EACH face parallel to x
+    (top and bottom, the corners not counted), face_y the same for the two
+    faces parallel to y. Every bar touches the stirrup with its own
+    diameter. Returns [(x, y, key)], corners first."""
+    x0, y0, x1, y1 = inner
+
+    def r(key):
+        return BAR_DIAMETERS_MM[key] / 2000.0
+
+    rc_ = r(corner_key)
+    if x1 - x0 < 4 * rc_ or y1 - y0 < 4 * rc_:
+        raise SpecError(u"La seccion es muy pequena para esas barras")
+    bars = [(x0 + rc_, y0 + rc_, corner_key), (x1 - rc_, y0 + rc_, corner_key),
+            (x1 - rc_, y1 - rc_, corner_key), (x0 + rc_, y1 - rc_, corner_key)]
+    count, key = face_x
+    for k in range(1, count + 1):
+        x = (x0 + rc_) + (x1 - x0 - 2 * rc_) * k / (count + 1)
+        bars.append((x, y0 + r(key), key))
+        bars.append((x, y1 - r(key), key))
+    count, key = face_y
+    for k in range(1, count + 1):
+        y = (y0 + rc_) + (y1 - y0 - 2 * rc_) * k / (count + 1)
+        bars.append((x0 + r(key), y, key))
+        bars.append((x1 - r(key), y, key))
+    return bars
+
+
+def bar_seat(click, stirrup_outline, stirrup_key, bar_key, snap=BAR_SEAT_SNAP):
+    """Where a bar clicked at `click` sits against a closed stirrup: its
+    center on the line `stirrup + bar radius` inside the stirrup's inner
+    face (in a corner when the click is near one), or None if the click
+    isn't within `snap` of that line."""
+    ds = BAR_DIAMETERS_MM[stirrup_key] / 1000.0
+    rb = BAR_DIAMETERS_MM[bar_key] / 2000.0
+    try:
+        seats = offset_polygon_outward(stirrup_outline, -(ds + rb))
+    except SpecError:
+        return None
+    for corner in seats:
+        if math.hypot(click[0] - corner[0], click[1] - corner[1]) <= snap * 0.7:
+            return corner
+    best = None
+    n = len(seats)
+    for k in range(n):
+        (ax, ay), (bx, by) = seats[k], seats[(k + 1) % n]
+        dx, dy = bx - ax, by - ay
+        l2 = dx * dx + dy * dy
+        if l2 < 1e-12:
+            continue
+        t = max(0.0, min(1.0, ((click[0] - ax) * dx + (click[1] - ay) * dy) / l2))
+        px, py = ax + t * dx, ay + t * dy
+        d = math.hypot(click[0] - px, click[1] - py)
+        if d <= snap and (best is None or d < best[0]):
+            best = (d, (px, py))
+    return best[1] if best else None

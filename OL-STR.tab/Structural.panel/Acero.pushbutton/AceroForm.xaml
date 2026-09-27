@@ -136,11 +136,20 @@
                     <RadioButton x:Name="rb_shape_open" GroupName="shape" Content="Abierto (U)" Margin="0,0,20,0"
                                  VerticalAlignment="Center"
                                  ToolTip="Clic en cada punto por las barras que abraza y clic derecho para terminarlo sin cerrar (ej. estribo de confinamiento en U)."/>
-                    <TextBlock Text="Barras longitudinales: " VerticalAlignment="Center"/>
-                    <TextBox x:Name="txt_auto_long" Width="130" Margin="0,0,4,0" VerticalAlignment="Center"
-                             ToolTip="Ej. 8&#216;5/8&quot;  o  4&#216;3/4&quot; + 4&#216;5/8&quot;"/>
-                    <Button Content="Autom&#225;tico" Width="85" Click="auto_click"
-                            ToolTip="Reparte esas barras y dibuja el estribo de borde (solo secciones rectangulares)."/>
+                    <TextBlock Text="Barras:  Esquinas &#216;" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="cbo_bar_corner" Width="62" Margin="2,0,8,0"/>
+                    <TextBlock x:Name="lbl_face_x" Text="Caras de b: " VerticalAlignment="Center"/>
+                    <TextBox x:Name="txt_face_x_n" Width="26" Text="1" VerticalAlignment="Center"
+                             ToolTip="Barras en CADA una de estas dos caras, sin contar las esquinas"/>
+                    <TextBlock Text=" x &#216;" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="cbo_bar_face_x" Width="62" Margin="2,0,8,0"/>
+                    <TextBlock x:Name="lbl_face_y" Text="Caras de h: " VerticalAlignment="Center"/>
+                    <TextBox x:Name="txt_face_y_n" Width="26" Text="2" VerticalAlignment="Center"
+                             ToolTip="Barras en CADA una de estas dos caras, sin contar las esquinas"/>
+                    <TextBlock Text=" x &#216;" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="cbo_bar_face_y" Width="62" Margin="2,0,8,0"/>
+                    <Button Content="Colocar barras" Width="100" Click="auto_click"
+                            ToolTip="Coloca las barras pegadas al estribo de borde (si no hay, lo crea en el recubrimiento). Solo secciones rectangulares."/>
                 </WrapPanel>
                 <TextBlock DockPanel.Dock="Top" x:Name="txt_status" Foreground="#FFC0392B" FontWeight="Bold"
                            TextWrapping="Wrap" Margin="0,0,0,4" Visibility="Collapsed"/>
@@ -168,7 +177,7 @@
                     </WrapPanel>
                 </Border>
                 <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
-                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barra: clic donde va. Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
+                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barra: clic donde va (cerca de un estribo se pega a su cara interior). Los puntos se ajustan a las barras y a 1 cm. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
                 <!-- Three views: 3D (large, left), elevation and plan (the sketch). Mouse wheel
                      zooms, middle button drag pans, "Ajustar" refits; in 3D a
                      left drag orbits. -->

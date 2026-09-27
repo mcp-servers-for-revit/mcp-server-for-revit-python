@@ -231,6 +231,9 @@ class AceroWindow(forms.WPFWindow):
         self.kind_for = {"stirrup": rs.KIND_EDGE, "tie": rs.KIND_CONFINEMENT}
         self.bar_key = u'5/8"'
         self._updating_steel = False
+        for combo in (self.cbo_bar_corner, self.cbo_bar_face_x, self.cbo_bar_face_y):
+            combo.ItemsSource = List[str](BAR_DIAMETERS)
+            combo.SelectedItem = u'5/8"'
         self.selected = None  # index of the stirrup whose measures are shown
         # Plan / elevation / 3D views: zoom-pan state and what they last showed.
         self.plan_nav = rv.Nav2D()
@@ -333,6 +336,9 @@ class AceroWindow(forms.WPFWindow):
         self.scene._extent = None  # refit the 3D camera to the new column
         self._update_measures()
         section = t.section
+        if section is not None and section.is_rectangle:
+            self.lbl_face_x.Text = u"Caras de {:.0f} cm: ".format(section.b * rc.FT * 100)
+            self.lbl_face_y.Text = u"Caras de {:.0f} cm: ".format(section.h * rc.FT * 100)
         if section is None:
             self.txt_section.Text = u"Seccion {}: {}".format(t.name, t.section_error)
         else:
@@ -1265,6 +1271,9 @@ class AceroWindow(forms.WPFWindow):
         if frame is None:
             return
         cursor, on_bar = self.snap(frame, args.GetPosition(self.canvas))
+        if self._tool() == "bar" and not on_bar:
+            # preview where the bar would sit against a stirrup
+            cursor = self._seat_bar(self.to_m(frame, args.GetPosition(self.canvas))) or cursor
         if cursor == self.cursor_m:
             return  # same snapped point: nothing to redraw
         self.cursor_m = cursor
@@ -1280,6 +1289,9 @@ class AceroWindow(forms.WPFWindow):
         tool = self._tool()
         if tool == "bar":
             if not on_bar:
+                seat = self._seat_bar(self.to_m(frame, p))
+                if seat is not None:
+                    point = seat  # against the stirrup
                 self._push_undo()
                 self.design["bars"].append((point[0], point[1], self.bar_key))
         elif tool in ("stirrup", "rect"):
@@ -1433,19 +1445,70 @@ class AceroWindow(forms.WPFWindow):
                         u"dibuja las barras y estribos.", title="Acero")
             return
         f = self._get_form()
+        edge_key = f["edge"]
+        ds = rs.BAR_DIAMETERS_MM[edge_key] / 1000.0
         try:
-            groups = rs.parse_longitudinal(self.txt_auto_long.Text)
             cover = float(f["cover"].replace(u",", u".")) / 100.0
-            design = rs.auto_design(section.b * rc.FT, section.h * rc.FT, cover, f["edge"], groups)
-        except (rs.SpecError, ValueError) as e:
-            forms.alert(u"Revisa las barras de Automatico (ej. 8Ø5/8\") y el recubrimiento: {}".format(e),
+            face_x = (int(self.txt_face_x_n.Text or u"0"), self.cbo_bar_face_x.SelectedItem)
+            face_y = (int(self.txt_face_y_n.Text or u"0"), self.cbo_bar_face_y.SelectedItem)
+            if face_x[0] < 0 or face_y[0] < 0:
+                raise ValueError()
+        except ValueError:
+            forms.alert(u"Escribe cuantas barras van en cada cara (0, 1, 2...) y el recubrimiento.",
                         title="Acero")
             return
+        corner_key = self.cbo_bar_corner.SelectedItem
+        # The bars sit against the edge stirrup already drawn (rectangular),
+        # or against one placed on the cover.
+        index = None
+        inner = None
+        for i, (kind, poly, wrap, is_open) in enumerate(self.design["stirrups"]):
+            if kind != rs.KIND_EDGE or is_open:
+                continue
+            outline = rs.stirrup_outline(poly, self.design["bars"], edge_key, wrap)
+            if rs.rect_measures(outline, section.polygon_m) is not None:
+                x0, y0, x1, y1 = rs.outer_rect(poly, self.design["bars"], edge_key, wrap)
+                index, inner = i, (x0 + ds, y0 + ds, x1 - ds, y1 - ds)
+                break
+        if inner is None:
+            x0, y0, x1, y1 = rs.cover_bounds(section.polygon_m, cover)
+            inner = (x0 + ds, y0 + ds, x1 - ds, y1 - ds)
+        try:
+            bars = rs.custom_bar_layout(inner, corner_key, face_x, face_y)
+        except rs.SpecError as e:
+            forms.alert(u"{}".format(e), title="Acero")
+            return
+        corners = [(x, y) for x, y, _ in bars[:4]]
+        edge = (rs.KIND_EDGE, corners, rs.BAR_DIAMETERS_MM[corner_key] / 2000.0, False)
         self._push_undo()
-        self.design = design
+        self.design["bars"] = bars
+        if index is None:
+            self.design["stirrups"].insert(0, edge)
+            index = 0
+        else:
+            self.design["stirrups"][index] = edge
         self.draft = []
-        self._select(0)  # show the perimeter stirrup's measures
+        self._select(index)  # show the edge stirrup's measures
         self.redraw()
+
+    def _seat_bar(self, click_m):
+        """A new bar clicked near a closed stirrup sits against its inner
+        face (in a corner when near one); None when not near any."""
+        best = None
+        for kind, poly, wrap, is_open in self.design["stirrups"]:
+            if is_open:
+                continue
+            key = self._family_key(kind)
+            try:
+                outline = rs.stirrup_outline(poly, self.design["bars"], key, wrap)
+            except rs.SpecError:
+                continue
+            seat = rs.bar_seat(click_m, outline, key, self.bar_key)
+            if seat is not None:
+                d = ((seat[0] - click_m[0]) ** 2 + (seat[1] - click_m[1]) ** 2) ** 0.5
+                if best is None or d < best[0]:
+                    best = (d, seat)
+        return best[1] if best else None
 
     def undo_click(self, sender, args):
         if self.draft:

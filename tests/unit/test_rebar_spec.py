@@ -423,3 +423,27 @@ def test_zone_positions_match_plain_positions():
     tagged = stirrup_zone_positions(2.65, [(1, 0.05), (6, 0.10)], 0.20)
     assert tagged[0][1] == 0 and tagged[1][1] == 1 and tagged[-1][1] == 0
     assert any(zone == 2 for _, zone in tagged)
+
+
+class TestCustomBars:
+    inner = (-0.1005, -0.3505, 0.1005, 0.3505)  # 30x80, cover 4 cm, 3/8" stirrup
+
+    def test_mixed_diameters_all_touch_the_stirrup(self):
+        from revit_mcp.rebar_spec import custom_bar_layout
+
+        bars = custom_bar_layout(self.inner, '3/4"', (1, '5/8"'), (2, '5/8"'))
+        assert len(bars) == 4 + 2 + 4
+        assert bars[0] == (pytest.approx(-0.1005 + 0.009525), pytest.approx(-0.3505 + 0.009525), '3/4"')
+        face_y = [b for b in bars[4:] if b[0] < 0]
+        for x, y, key in face_y:  # left face bars: their own radius off the stirrup
+            assert x == pytest.approx(-0.1005 + 0.0079375)
+
+    def test_seat_on_a_side_and_in_a_corner(self):
+        from revit_mcp.rebar_spec import bar_seat
+
+        outline = [(-0.11, -0.36), (0.11, -0.36), (0.11, 0.36), (-0.11, 0.36)]
+        side = bar_seat((-0.085, 0.0), outline, '3/8"', '5/8"')
+        assert side == (pytest.approx(-0.11 + 0.009525 + 0.0079375), pytest.approx(0.0))
+        corner = bar_seat((-0.09, -0.34), outline, '3/8"', '5/8"')
+        assert corner == (pytest.approx(-0.0925375), pytest.approx(-0.3425375))
+        assert bar_seat((0.0, 0.0), outline, '3/8"', '5/8"') is None  # far from it
