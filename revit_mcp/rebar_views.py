@@ -192,7 +192,7 @@ def _widen(data):
 
 def elevation_extent(data):
     half = data["width"] * _widen(data) / 2.0
-    return -half - 0.20, -0.10, half + 0.30, data["height"] + 0.14
+    return -half - 0.20, -0.17, half + 0.30, data["height"] + 0.14
 
 
 def draw_elevation(canvas, data, frame):
@@ -241,7 +241,7 @@ def draw_elevation(canvas, data, frame):
 
     _text(canvas, frame, 0.0, -0.045, u"Luz libre {:.2f} m".format(clear), brush=C_DIM, size=10)
     if data.get("message"):
-        _text(canvas, frame, 0.0, -0.09, data["message"], brush=_brush(192, 57, 43), size=10)
+        _text(canvas, frame, 0.0, -0.13, data["message"], brush=_brush(192, 57, 43), size=10)
 
 
 # --- 3D -----------------------------------------------------------------------
