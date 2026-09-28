@@ -1,0 +1,142 @@
+{
+  "Uuid": "76f225c9-6744-4d39-ac9c-7b35fe9da22d",
+  "IsCustomNode": false,
+  "Description": "Genera encofrado (2 in de espesor) para elementos estructurales del modelo activo: cimentaciones, muros, columnas, vigas y losas.",
+  "Name": "Generar Encofrado - 2in",
+  "ElementResolver": {
+    "ResolutionMap": {}
+  },
+  "Inputs": [],
+  "Outputs": [],
+  "Nodes": [
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "NodeType": "PythonScriptNode",
+      "InputValue": "# -*- coding: utf-8 -*-\n\"\"\"\nGenerar Encofrado - Dynamo Python Script node\nAutomated structural formwork (encofrado) generation, standalone version\nfor Dynamo (CPython3 engine). Self-contained: no dependency on pyRevit or\nthis repo's `revit_mcp` package.\n\nCreates one DirectShape panel (Generic Models) per free face of every\nfoundation, wall, structural column, beam and floor in the active model,\nskipping faces that are in contact with a neighboring structural element\n(so a beam framing into a column doesn't get double-thickness formwork\nat the joint) and, optionally, the top pour face and foundation\nundersides that rest on ground/blinding.\n\nPanel thickness defaults to 2\" per project requirement.\nEdit the CONFIGURATION block below to change categories/behaviour.\n\"\"\"\n\nimport clr\nimport System\n\nclr.AddReference('RevitAPI')\nclr.AddReference('RevitAPIUI')\nfrom Autodesk.Revit.DB import (\n    BuiltInCategory,\n    BuiltInParameter,\n    CurveLoop,\n    DirectShape,\n    Element,\n    ElementId,\n    FilteredElementCollector,\n    GeometryCreationUtilities,\n    GeometryInstance,\n    GeometryObject,\n    Line,\n    Options,\n    PlanarFace,\n    Solid,\n    SolidCurveIntersectionOptions,\n    UV,\n    ViewDetailLevel,\n    XYZ,\n)\n\nclr.AddReference('RevitServices')\nfrom RevitServices.Persistence import DocumentManager\nfrom RevitServices.Transactions import TransactionManager\n\nfrom System.Collections.Generic import List\n\ndoc = DocumentManager.Instance.CurrentDBDocument\n\n# ---------------------------------------------------------------------\n# CONFIGURATION - edit these to change behaviour, then run the node\n# ---------------------------------------------------------------------\nPANEL_THICKNESS_IN = 2.0          # formwork thickness, inches (project requirement)\nCONTACT_TOLERANCE_MM = 5.0        # gap treated as \"touching\" between elements\nEXCLUDE_TOP_FACES = True          # skip the open top face (pour surface)\nEXCLUDE_FOUNDATION_BOTTOM = True  # skip foundation faces resting on ground/blinding\nCATEGORIES = [\"foundations\", \"walls\", \"columns\", \"beams\", \"slabs\"]\nCREATE_GEOMETRY = True            # False = quantity takeoff only, no panels created\n# ---------------------------------------------------------------------\n\nIN_TO_FT = 1.0 / 12.0\nMM_TO_FT = 1.0 / 304.8\nFT2_TO_M2 = 0.09290304\n\nPANEL_THICKNESS_FT = PANEL_THICKNESS_IN * IN_TO_FT\nCONTACT_TOLERANCE_FT = CONTACT_TOLERANCE_MM * MM_TO_FT\n\nTOP_NORMAL_Z = 0.98      # cos(~11.5deg) - near-vertical-up normals count as \"top\"\nBOTTOM_NORMAL_Z = -0.98\nDEFAULT_CONTACT_GRID_FT = 0.25\nMAX_GRID_STEPS = 80\n\nCATEGORY_MAP = {\n    \"foundations\": {\n        \"bic\": BuiltInCategory.OST_StructuralFoundation,\n        \"label\": \"Cimentacion\",\n        \"rests_on_ground\": True,\n    },\n    \"walls\": {\n        \"bic\": BuiltInCategory.OST_Walls,\n        \"label\": \"Muros\",\n        \"rests_on_ground\": False,\n    },\n    \"columns\": {\n        \"bic\": BuiltInCategory.OST_StructuralColumns,\n        \"label\": \"Columnas\",\n        \"rests_on_ground\": False,\n    },\n    \"beams\": {\n        \"bic\": BuiltInCategory.OST_StructuralFraming,\n        \"label\": \"Vigas\",\n        \"rests_on_ground\": False,\n    },\n    \"slabs\": {\n        \"bic\": BuiltInCategory.OST_Floors,\n        \"label\": \"Losas\",\n        \"rests_on_ground\": False,\n    },\n}\n\n\n# ----------------------------- helpers --------------------------------\n\ndef make_element_id(value):\n    \"\"\"ElementId(int) is ambiguous on Revit 2027+ (added ElementId(BuiltInParameter)\n    / ElementId(BuiltInCategory) overloads). System.Int64 forces the right one.\"\"\"\n    try:\n        return ElementId(System.Int64(value))\n    except Exception:\n        return ElementId(int(value))\n\n\ndef element_id_value(element_id):\n    \"\"\"Revit 2024+ uses .Value (int64); Revit 2026 removed .IntegerValue.\"\"\"\n    try:\n        return int(element_id.Value)\n    except AttributeError:\n        return int(element_id.IntegerValue)\n\n\n_GEOM_OPTIONS = None\n\n\ndef geometry_options():\n    global _GEOM_OPTIONS\n    if _GEOM_OPTIONS is None:\n        opts = Options()\n        opts.ComputeReferences = True\n        opts.DetailLevel = ViewDetailLevel.Fine\n        opts.IncludeNonVisibleObjects = False\n        _GEOM_OPTIONS = opts\n    return _GEOM_OPTIONS\n\n\ndef collect_solids(geometry_element, solids):\n    for obj in geometry_element:\n        if isinstance(obj, Solid):\n            try:\n                if obj.Volume > 1e-9 and obj.Faces.Size > 0:\n                    solids.append(obj)\n            except Exception:\n                continue\n        elif isinstance(obj, GeometryInstance):\n            try:\n                collect_solids(obj.GetInstanceGeometry(), solids)\n            except Exception:\n                continue\n\n\ndef get_element_solids(element):\n    solids = []\n    try:\n        geom = element.get_Geometry(geometry_options())\n    except Exception:\n        return solids\n    if geom is None:\n        return solids\n    collect_solids(geom, solids)\n    return solids\n\n\ndef get_mark_or_name(element):\n    try:\n        p = element.get_Parameter(BuiltInParameter.ALL_MODEL_MARK)\n        if p and p.HasValue:\n            val = (p.AsString() or \"\").strip()\n            if val:\n                return val\n    except Exception:\n        pass\n    try:\n        return element.Name\n    except Exception:\n        return \"Sin nombre\"\n\n\nclass Candidate(object):\n    def __init__(self, element, category_key, bbox):\n        self.element = element\n        self.category_key = category_key\n        self.bbox = bbox\n        self._solids = None\n\n    def get_solids(self):\n        if self._solids is None:\n            self._solids = get_element_solids(self.element)\n        return self._solids\n\n\ndef bbox_overlaps(bbox_a, bbox_b, tol_ft):\n    if bbox_a is None or bbox_b is None:\n        return False\n    return (\n        bbox_a.Min.X - tol_ft <= bbox_b.Max.X\n        and bbox_a.Max.X + tol_ft >= bbox_b.Min.X\n        and bbox_a.Min.Y - tol_ft <= bbox_b.Max.Y\n        and bbox_a.Max.Y + tol_ft >= bbox_b.Min.Y\n        and bbox_a.Min.Z - tol_ft <= bbox_b.Max.Z\n        and bbox_a.Max.Z + tol_ft >= bbox_b.Min.Z\n    )\n\n\nclass MinMaxBox(object):\n    __slots__ = (\"Min\", \"Max\")\n\n    def __init__(self, min_pt, max_pt):\n        self.Min = min_pt\n        self.Max = max_pt\n\n\ndef face_world_bbox(face):\n    try:\n        mesh = face.Triangulate()\n    except Exception:\n        return None\n    if mesh is None or mesh.NumTriangles == 0:\n        return None\n\n    min_x = min_y = min_z = None\n    max_x = max_y = max_z = None\n    for i in range(mesh.NumTriangles):\n        tri = mesh.get_Triangle(i)\n        for k in range(3):\n            v = tri.get_Vertex(k)\n            if min_x is None or v.X < min_x:\n                min_x = v.X\n            if max_x is None or v.X > max_x:\n                max_x = v.X\n            if min_y is None or v.Y < min_y:\n                min_y = v.Y\n            if max_y is None or v.Y > max_y:\n                max_y = v.Y\n            if min_z is None or v.Z < min_z:\n                min_z = v.Z\n            if max_z is None or v.Z > max_z:\n                max_z = v.Z\n\n    if min_x is None:\n        return None\n    return MinMaxBox(XYZ(min_x, min_y, min_z), XYZ(max_x, max_y, max_z))\n\n\ndef filter_touching_neighbors(face, neighbors, tol_ft):\n    face_bbox = face_world_bbox(face)\n    if face_bbox is None:\n        return neighbors\n    return [\n        n for n in neighbors\n        if n.bbox is not None and bbox_overlaps(face_bbox, n.bbox, tol_ft)\n    ]\n\n\ndef face_sample_point(face):\n    try:\n        mesh = face.Triangulate()\n        if mesh is None or mesh.NumTriangles == 0:\n            return None\n        tri = mesh.get_Triangle(0)\n        v0, v1, v2 = tri.get_Vertex(0), tri.get_Vertex(1), tri.get_Vertex(2)\n        return XYZ(\n            (v0.X + v1.X + v2.X) / 3.0,\n            (v0.Y + v1.Y + v2.Y) / 3.0,\n            (v0.Z + v1.Z + v2.Z) / 3.0,\n        )\n    except Exception:\n        return None\n\n\ndef point_probes_into_solid(point, direction, solid, tolerance_ft):\n    try:\n        probe_len = max(tolerance_ft * 2.0, 0.001)\n        end_point = point.Add(direction.Multiply(probe_len))\n        line = Line.CreateBound(point, end_point)\n    except Exception:\n        return False\n    try:\n        result = solid.IntersectWithCurve(line, SolidCurveIntersectionOptions())\n        return result is not None and result.SegmentCount > 0\n    except Exception:\n        return False\n\n\ndef has_contact(sample_point, normal, tolerance_ft, neighbors):\n    for neighbor in neighbors:\n        for solid in neighbor.get_solids():\n            if point_probes_into_solid(sample_point, normal, solid, tolerance_ft):\n                return True\n    return False\n\n\ndef quad_loop(p00, p10, p11, p01, normal):\n    edge1 = p10 - p00\n    edge2 = p01 - p00\n    computed_normal = edge1.CrossProduct(edge2)\n    pts = [p00, p10, p11, p01]\n    if computed_normal.DotProduct(normal) < 0:\n        pts.reverse()\n    loop = CurveLoop()\n    for idx in range(4):\n        a = pts[idx]\n        b = pts[(idx + 1) % 4]\n        loop.Append(Line.CreateBound(a, b))\n    return loop\n\n\ndef partition_face_by_contact(face, normal, neighbors, tol_ft, grid_ft):\n    \"\"\"Split a planar face into the free sub-region (gets formwork) and the\n    sub-region touching a neighbor (e.g. a beam framing into a column),\n    via a cheap UV point-probe grid rather than a fragile solid boolean.\"\"\"\n    try:\n        bbox_uv = face.GetBoundingBox()\n    except Exception:\n        return None\n\n    u0, u1 = bbox_uv.Min.U, bbox_uv.Max.U\n    v0, v1 = bbox_uv.Min.V, bbox_uv.Max.V\n    if u1 <= u0 or v1 <= v0:\n        return None\n\n    mid_uv = UV((u0 + u1) / 2.0, (v0 + v1) / 2.0)\n    try:\n        deriv = face.ComputeDerivatives(mid_uv)\n        u_len = deriv.BasisX.GetLength()\n        v_len = deriv.BasisY.GetLength()\n    except Exception:\n        return None\n\n    if u_len < 1e-9 or v_len < 1e-9:\n        return None\n\n    u_steps = max(1, min(MAX_GRID_STEPS, int(round((u1 - u0) * u_len / grid_ft))))\n    v_steps = max(1, min(MAX_GRID_STEPS, int(round((v1 - v0) * v_len / grid_ft))))\n\n    du = (u1 - u0) / u_steps\n    dv = (v1 - v0) / v_steps\n    cell_area_ft2 = du * u_len * dv * v_len\n\n    grid = [[False for _ in range(u_steps)] for _ in range(v_steps)]\n    contact_cells = 0\n    evaluated_cells = 0\n\n    for j in range(v_steps):\n        v_mid = v0 + (j + 0.5) * dv\n        for i in range(u_steps):\n            u_mid = u0 + (i + 0.5) * du\n            uv = UV(u_mid, v_mid)\n            try:\n                if not face.IsInside(uv):\n                    continue\n                point = face.Evaluate(uv)\n            except Exception:\n                continue\n\n            evaluated_cells += 1\n            if has_contact(point, normal, tol_ft, neighbors):\n                contact_cells += 1\n            else:\n                grid[j][i] = True\n\n    if evaluated_cells == 0:\n        return None\n\n    rectangles = []\n    open_rects = {}\n    for j in range(v_steps):\n        row_runs = []\n        i = 0\n        while i < u_steps:\n            if grid[j][i]:\n                start = i\n                while i < u_steps and grid[j][i]:\n                    i += 1\n                row_runs.append((start, i))\n            else:\n                i += 1\n\n        row_run_set = set(row_runs)\n        for key in list(open_rects.keys()):\n            if key not in row_run_set:\n                start_j = open_rects.pop(key)\n                rectangles.append((key[0], key[1], start_j, j))\n        for run in row_runs:\n            if run not in open_rects:\n                open_rects[run] = j\n\n    for key, start_j in open_rects.items():\n        rectangles.append((key[0], key[1], start_j, v_steps))\n\n    included_specs = []\n    included_area_m2 = 0.0\n    for i_start, i_end, j_start, j_end in rectangles:\n        u_a = u0 + i_start * du\n        u_b = u0 + i_end * du\n        v_a = v0 + j_start * dv\n        v_b = v0 + j_end * dv\n        try:\n            p00 = face.Evaluate(UV(u_a, v_a))\n            p10 = face.Evaluate(UV(u_b, v_a))\n            p11 = face.Evaluate(UV(u_b, v_b))\n            p01 = face.Evaluate(UV(u_a, v_b))\n            loop = quad_loop(p00, p10, p11, p01, normal)\n        except Exception:\n            continue\n\n        area_m2 = (u_b - u_a) * u_len * (v_b - v_a) * v_len * FT2_TO_M2\n        included_specs.append({\n            \"loops\": List[CurveLoop]([loop]),\n            \"direction\": normal,\n            \"area_m2\": round(area_m2, 6),\n        })\n        included_area_m2 += area_m2\n\n    contact_area_m2 = cell_area_ft2 * contact_cells * FT2_TO_M2\n\n    return {\n        \"included_faces\": included_specs,\n        \"included_area_m2\": included_area_m2,\n        \"contact_area_m2\": contact_area_m2,\n    }\n\n\ndef classify_element_faces(candidate, neighbors, warnings):\n    cat_info = CATEGORY_MAP[candidate.category_key]\n\n    included_faces = []\n    area_included = 0.0\n    face_count = 0\n    skipped_curved = 0\n\n    for solid in candidate.get_solids():\n        for face in solid.Faces:\n            if not isinstance(face, PlanarFace):\n                skipped_curved += 1\n                continue\n            face_count += 1\n            normal = face.FaceNormal\n            area_m2 = face.Area * FT2_TO_M2\n            is_bottom = normal.Z < BOTTOM_NORMAL_Z\n\n            if EXCLUDE_TOP_FACES and normal.Z > TOP_NORMAL_Z:\n                continue\n\n            if is_bottom and cat_info[\"rests_on_ground\"] and EXCLUDE_FOUNDATION_BOTTOM:\n                continue\n\n            touching = filter_touching_neighbors(face, neighbors, CONTACT_TOLERANCE_FT)\n\n            if touching:\n                partition = None\n                try:\n                    partition = partition_face_by_contact(\n                        face, normal, touching, CONTACT_TOLERANCE_FT, DEFAULT_CONTACT_GRID_FT\n                    )\n                except Exception as e:\n                    warnings.append(\n                        \"Elemento {}: fallo el recorte de una cara por contacto - {}\".format(\n                            element_id_value(candidate.element.Id), str(e)\n                        )\n                    )\n\n                if partition is not None:\n                    included_faces.extend(partition[\"included_faces\"])\n                    area_included += partition[\"included_area_m2\"]\n                    continue\n\n                sample_point = face_sample_point(face)\n                if sample_point is None:\n                    skipped_curved += 1\n                    continue\n                if has_contact(sample_point, normal, CONTACT_TOLERANCE_FT, touching):\n                    continue\n\n            try:\n                loops = List[CurveLoop](face.GetEdgesAsCurveLoops())\n            except Exception:\n                warnings.append(\n                    \"No se pudieron extraer los bordes de una cara en el elemento {}\".format(\n                        element_id_value(candidate.element.Id)\n                    )\n                )\n                continue\n\n            included_faces.append({\"loops\": loops, \"direction\": normal, \"area_m2\": area_m2})\n            area_included += area_m2\n\n    if skipped_curved:\n        warnings.append(\n            \"Elemento {} ({}): {} cara(s) no planas omitidas\".format(\n                element_id_value(candidate.element.Id), cat_info[\"label\"], skipped_curved\n            )\n        )\n\n    return {\n        \"included_faces\": included_faces,\n        \"included_area_m2\": round(area_included, 4),\n        \"face_count\": face_count,\n    }\n\n\ndef create_formwork_panel(document, included_face, source_element, category_key):\n    solid = GeometryCreationUtilities.CreateExtrusionGeometry(\n        included_face[\"loops\"], included_face[\"direction\"], PANEL_THICKNESS_FT\n    )\n    category_id = ElementId(BuiltInCategory.OST_GenericModel)\n    ds = DirectShape.CreateElement(document, category_id)\n    ds.SetShape(List[GeometryObject]([solid]))\n    ds.Name = \"Encofrado\"\n\n    comments = \"Encofrado 2in | Origen: {} {} (Id {}) | Area: {} m2\".format(\n        CATEGORY_MAP[category_key][\"label\"],\n        get_mark_or_name(source_element),\n        element_id_value(source_element.Id),\n        round(included_face[\"area_m2\"], 3),\n    )\n    try:\n        p = ds.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)\n        if p and not p.IsReadOnly:\n            p.Set(comments)\n    except Exception:\n        pass\n\n    return ds\n\n\ndef collect_candidates():\n    built = []\n    for category_key in CATEGORIES:\n        cat_info = CATEGORY_MAP.get(category_key)\n        if not cat_info:\n            continue\n        collector = (\n            FilteredElementCollector(doc)\n            .OfCategory(cat_info[\"bic\"])\n            .WhereElementIsNotElementType()\n        )\n        for element in collector:\n            try:\n                bbox = element.get_BoundingBox(None)\n            except Exception:\n                bbox = None\n            built.append(Candidate(element, category_key, bbox))\n    return built\n\n\n# ----------------------------- main ------------------------------------\n\nwarnings = []\ncandidates = collect_candidates()\n\nelement_results = []\ncategory_totals = {}\npanels = []\n\nif CREATE_GEOMETRY:\n    TransactionManager.Instance.EnsureInTransaction(doc)\n\nfor candidate in candidates:\n    neighbors = [\n        other for other in candidates\n        if other is not candidate and bbox_overlaps(candidate.bbox, other.bbox, CONTACT_TOLERANCE_FT)\n    ]\n\n    solids = candidate.get_solids()\n    if not solids:\n        warnings.append(\n            \"Elemento {}: no se pudo extraer geometria solida, se omite\".format(\n                element_id_value(candidate.element.Id)\n            )\n        )\n        continue\n\n    classification = classify_element_faces(candidate, neighbors, warnings)\n\n    if CREATE_GEOMETRY:\n        for face_spec in classification[\"included_faces\"]:\n            try:\n                panel = create_formwork_panel(doc, face_spec, candidate.element, candidate.category_key)\n                panels.append(panel)\n            except Exception as e:\n                warnings.append(\n                    \"Elemento {}: no se pudo crear el panel de una cara ({} m2) - {}\".format(\n                        element_id_value(candidate.element.Id), face_spec[\"area_m2\"], str(e)\n                    )\n                )\n\n    cat_label = CATEGORY_MAP[candidate.category_key][\"label\"]\n    totals = category_totals.setdefault(cat_label, {\"included_area_m2\": 0.0, \"element_count\": 0})\n    totals[\"included_area_m2\"] = round(totals[\"included_area_m2\"] + classification[\"included_area_m2\"], 4)\n    totals[\"element_count\"] += 1\n\n    element_results.append({\n        \"id\": element_id_value(candidate.element.Id),\n        \"mark\": get_mark_or_name(candidate.element),\n        \"category\": cat_label,\n        \"included_area_m2\": classification[\"included_area_m2\"],\n    })\n\nif CREATE_GEOMETRY:\n    TransactionManager.Instance.TransactionTaskDone()\n\nreport = {\n    \"panel_thickness_in\": PANEL_THICKNESS_IN,\n    \"elements_processed\": len(element_results),\n    \"panels_created\": len(panels),\n    \"category_totals\": category_totals,\n    \"warnings\": warnings,\n    \"elements\": element_results,\n}\n\nOUT = (panels, report)\n",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "8a9a922f3c3b4d8c85d37d0565f660a2",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "cf953c8c2d3243538e49eb1f48b06072",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Watch, CoreNodeModels",
+      "NodeType": "ExtensionNode",
+      "Id": "44f604a08f10419993ca18252b7a7f85",
+      "Inputs": [
+        {
+          "Id": "d615ce9e01d04a33a53d66b8188249d8",
+          "Name": "",
+          "Description": "Node to show output values",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "5a77d21b636f490282f5a88f998e819b",
+          "Name": "",
+          "Description": "The evaluated value of the input",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Visualize the node's output"
+    }
+  ],
+  "Connectors": [
+    {
+      "Start": "cf953c8c2d3243538e49eb1f48b06072",
+      "End": "d615ce9e01d04a33a53d66b8188249d8",
+      "Id": "d9bf3db06d5e49b4b4407805065e25b5",
+      "IsHidden": "False"
+    }
+  ],
+  "Dependencies": [],
+  "NodeLibraryDependencies": [],
+  "Thumbnail": "",
+  "GraphDocumentationURL": null,
+  "ExtensionWorkspaceData": [
+    {
+      "ExtensionGuid": "28992e1d-abb9-417f-8b1b-05e053bee670",
+      "Name": "Properties",
+      "Version": "3.0",
+      "Data": {}
+    }
+  ],
+  "Author": "",
+  "Linting": {
+    "activeLinter": "None",
+    "activeLinterId": "7b75fb44-43fb-4631-a878-29f4d5d8399a",
+    "warningCount": 0,
+    "errorCount": 0
+  },
+  "Bindings": [],
+  "View": {
+    "Dynamo": {
+      "ScaleFactor": 1.0,
+      "HasRunWithoutCrash": false,
+      "IsVisibleInDynamoLibrary": true,
+      "Version": "3.0.0.0",
+      "RunType": "Manual",
+      "RunPeriod": "1000"
+    },
+    "Camera": {
+      "Name": "_Background Preview",
+      "EyeX": -17.0,
+      "EyeY": 24.0,
+      "EyeZ": 50.0,
+      "LookX": 12.0,
+      "LookY": -13.0,
+      "LookZ": -58.0,
+      "UpX": 0.0,
+      "UpY": 1.0,
+      "UpZ": 0.0
+    },
+    "ConnectorPins": [],
+    "NodeViews": [
+      {
+        "Name": "Python Script",
+        "Id": "8a9a922f3c3b4d8c85d37d0565f660a2",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 300.0,
+        "Y": 200.0
+      },
+      {
+        "Name": "Watch",
+        "Id": "44f604a08f10419993ca18252b7a7f85",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 720.0,
+        "Y": 200.0
+      }
+    ],
+    "Annotations": [],
+    "X": 0.0,
+    "Y": 0.0,
+    "Zoom": 1.0
+  },
+  "Category": ""
+}

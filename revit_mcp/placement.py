@@ -9,6 +9,7 @@ from pyrevit import routes, revit, DB
 import json
 import traceback
 import logging
+import creation_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,7 @@ def register_placement_routes(api):
 
                 t.Commit()
                 logger.info("Transaction committed successfully")
+                creation_tracker.register_created([new_instance.Id])
 
                 # Get actual placed location (may differ due to level constraints)
                 try:

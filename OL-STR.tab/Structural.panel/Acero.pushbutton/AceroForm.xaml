@@ -1,0 +1,284 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Acero - Columnas"
+        Height="880" Width="1560" MinWidth="1200" MinHeight="640"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip"
+        PreviewKeyDown="window_key">
+    <DockPanel Margin="12">
+        <!-- Bottom: run (the columns picked in the model, or else every
+             column of the checked types) -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right" x:Name="button_run" Content="Generar acero..." Width="220" Height="40"
+                    FontWeight="Bold" Click="run_click"
+                    ToolTip="Genera las columnas seleccionadas en el modelo (o, si lo eliges, todas las de su tipo en todos los niveles); si no hay ninguna seleccionada, todas las columnas de los tipos marcados."/>
+        </DockPanel>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="370"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="250"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: types + configuration -->
+            <DockPanel Grid.Column="0" Margin="0,0,10,0">
+                <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6"
+                           Text="1. Marca los tipos a configurar (o selecciona columnas en el modelo)."/>
+                <Button DockPanel.Dock="Top" x:Name="button_pick" Content="SELECCIONAR COLUMNAS" Height="34"
+                        FontWeight="Bold" Click="pick_click"/>
+                <TextBlock DockPanel.Dock="Top" x:Name="txt_picked" Foreground="Gray" HorizontalAlignment="Center"
+                           Margin="0,4,0,6" Text="No hay columnas seleccionadas en el modelo."/>
+                <CheckBox DockPanel.Dock="Top" x:Name="chk_all" Content="Seleccionar todo" Margin="0,0,0,4"
+                          Click="all_click"/>
+
+                <GroupBox DockPanel.Dock="Bottom" Header="2. Configuraci&#243;n de estribos" Margin="0,8,0,0" Padding="6,4,6,6">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="Estribo de confinamiento &#216;:" VerticalAlignment="Center"
+                                   ToolTip="Estribos interiores (los que no abrazan todas las barras) y grapas."/>
+                        <ComboBox Grid.Row="0" Grid.Column="1" x:Name="cbo_conf" VerticalAlignment="Center" SelectionChanged="stirrup_diameter_changed"/>
+                        <TextBlock Grid.Row="1" Text="     Distribuci&#243;n:" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="txt_conf_dist" TextChanged="config_changed" VerticalAlignment="Center"
+                                 ToolTip="Desde cada extremo, en la luz libre. Ej. 1@5 6@10 Rto@25. Vacio si no hay estribos interiores ni grapas."/>
+                        <TextBlock Grid.Row="2" Text="Estribo de borde &#216;:" VerticalAlignment="Center"
+                                   ToolTip="Estribo perimetral (el que abraza todas las barras)."/>
+                        <ComboBox Grid.Row="2" Grid.Column="1" x:Name="cbo_edge" VerticalAlignment="Center" SelectionChanged="stirrup_diameter_changed"/>
+                        <TextBlock Grid.Row="3" Text="     Distribuci&#243;n:" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="txt_edge_dist" TextChanged="config_changed" VerticalAlignment="Center"
+                                 ToolTip="Desde cada extremo, en la luz libre. Ej. 1@5 6@10 Rto@25  o  1@.05, 10@.10, rto@.20"/>
+                        <TextBlock Grid.Row="4" Text="Recubrimiento (cm):" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="txt_cover" TextChanged="config_changed" VerticalAlignment="Center"/>
+                        <CheckBox Grid.Row="5" x:Name="chk_nucleo" Click="config_changed" Content="Estribo en n&#250;cleo" VerticalAlignment="Center"
+                                  ToolTip="Estribos tambien dentro del nudo viga-columna (desde el fondo de la viga hasta el tope)."/>
+                        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                                    IsEnabled="{Binding IsChecked, ElementName=chk_nucleo}">
+                            <TextBlock Text="@ " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_nucleo" TextChanged="config_changed" Width="50"/>
+                            <TextBlock Text=" cm" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Button Grid.Row="6" Grid.ColumnSpan="2" x:Name="button_save" Margin="0,8,0,0" Height="30"
+                                Content="Guardar configuraci&#243;n en los tipos marcados" Click="save_click"
+                                ToolTip="La configuraci&#243;n queda en el tipo: la usan todas sus columnas, en todos los niveles."/>
+                        <UniformGrid Grid.Row="7" Grid.ColumnSpan="2" Columns="2" Margin="0,6,0,0">
+                            <Button Content="Guardar en archivo..." Height="28" Margin="0,0,3,0" Click="file_save_click"
+                                    ToolTip="Guarda estos estribos y el dibujo de la seccion en un archivo, para usarlos en otro tipo o proyecto."/>
+                            <Button Content="Abrir archivo..." Height="28" Margin="3,0,0,0" Click="file_open_click"
+                                    ToolTip="Carga una configuracion guardada en el tipo elegido; luego pulsa 'Guardar configuracion en los tipos marcados'."/>
+                        </UniformGrid>
+                    </Grid>
+                </GroupBox>
+
+                <!-- Lap splices of the longitudinal bars (settings kept per user) -->
+                <Expander DockPanel.Dock="Bottom" Header="3. Empalme de barras longitudinales" Margin="0,8,0,0">
+                    <StackPanel Margin="6,4,6,4">
+                        <CheckBox x:Name="chk_splice" Click="splice_changed"
+                                  Content="Barras continuas en columnas apiladas, con empalme"
+                                  ToolTip="Las barras longitudinales siguen por todas las columnas del mismo tipo y eje (todos los niveles); cuando superan la longitud maxima se cortan con un empalme en la mitad central de un piso."/>
+                        <StackPanel Orientation="Horizontal" Margin="18,4,0,4"
+                                    IsEnabled="{Binding IsChecked, ElementName=chk_splice}">
+                            <TextBlock Text="Longitud maxima de barra: " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_splice_max" Width="45" TextChanged="splice_changed"/>
+                            <TextBlock Text=" m" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="Longitud de empalme por diametro (cm):" Margin="0,2,0,2"/>
+                        <WrapPanel x:Name="panel_laps" IsEnabled="{Binding IsChecked, ElementName=chk_splice}"/>
+                    </StackPanel>
+                </Expander>
+
+                <ListBox x:Name="list_types" SelectionMode="Single" SelectionChanged="type_selected"/>
+            </DockPanel>
+
+            <!-- Right: section drawing -->
+            <DockPanel Grid.Column="1">
+                <TextBlock DockPanel.Dock="Top" x:Name="txt_section" FontWeight="Bold" Margin="0,0,0,4"
+                           Text="Seccion: elige un tipo en la lista"/>
+                <!-- Custom stirrup sketch ("Boceto"): tool + the steel it uses -->
+                <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <TextBlock Text="Boceto: " FontWeight="Bold" VerticalAlignment="Center"/>
+                    <RadioButton x:Name="rb_stirrup" GroupName="tool" Content="Estribo" IsChecked="True" Margin="4,0,8,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <RadioButton x:Name="rb_rect" GroupName="tool" Margin="0,0,8,0" VerticalAlignment="Center"
+                                 Checked="tool_changed"
+                                 ToolTip="Estribo rectangular: clic en dos esquinas opuestas (se ajustan a las barras y a 1 cm).">
+                        <StackPanel Orientation="Horizontal">
+                            <Canvas Width="18" Height="18" Margin="0,0,4,0">
+                                <Rectangle Canvas.Left="2" Canvas.Top="2" Width="14" Height="14"
+                                           Stroke="#FF5A5A5A" StrokeThickness="1.5"/>
+                                <Rectangle Canvas.Left="0" Canvas.Top="0" Width="5" Height="5" Fill="#FF2F7FE0"/>
+                                <Rectangle Canvas.Left="13" Canvas.Top="13" Width="5" Height="5" Fill="#FF2F7FE0"/>
+                            </Canvas>
+                            <TextBlock Text="Mediante dos puntos" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton x:Name="rb_tie" GroupName="tool" Content="Grapa" Margin="0,0,8,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <RadioButton x:Name="rb_edit" GroupName="tool" Content="Editar" Margin="0,0,8,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"
+                                 ToolTip="Clic en un estribo para ver y cambiar sus medidas y su tipo (borde/confinamiento)."/>
+                    <RadioButton x:Name="rb_erase" GroupName="tool" Content="Borrar" Margin="0,0,16,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <TextBlock Text="&#216; acero: " VerticalAlignment="Center"/>
+                    <ComboBox x:Name="cbo_steel" Width="190" Margin="0,0,12,0" SelectionChanged="steel_changed"
+                              ToolTip="Estribo y Grapa: el di&#225;metro de la configuraci&#243;n de estribos (borde o confinamiento)."/>
+                    <Button Content="Deshacer" Width="70" Margin="0,0,4,0" Click="undo_click"/>
+                    <Button Content="Limpiar" Width="65" Margin="0,0,4,0" Click="clear_click"/>
+                </WrapPanel>
+                <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <TextBlock Text="Estribo: " VerticalAlignment="Center"/>
+                    <RadioButton x:Name="rb_shape_closed" GroupName="shape" Content="Cerrado" IsChecked="True"
+                                 Margin="0,0,8,0" VerticalAlignment="Center"
+                                 ToolTip="Clic en cada barra y clic derecho (o clic en la primera) para cerrarlo."/>
+                    <RadioButton x:Name="rb_shape_open" GroupName="shape" Content="Abierto (U)" Margin="0,0,12,0"
+                                 VerticalAlignment="Center"
+                                 ToolTip="Clic en cada punto por las barras que abraza y clic derecho para terminarlo sin cerrar (ej. estribo de confinamiento en U)."/>
+                    <TextBlock Text="Forma: " VerticalAlignment="Center"/>
+                    <TextBlock x:Name="txt_active_shape" Text="la que elija Revit" FontWeight="Bold" Margin="0,0,20,0"
+                               VerticalAlignment="Center"
+                               ToolTip="Forma de armadura de los estribos (o grapas) que dibujes. Se elige con un clic en el panel Formas de armadura."/>
+                    <!-- Longitudinal bars: pick a diameter, then click in the plan -->
+                    <TextBlock Text="Barras: " FontWeight="Bold" VerticalAlignment="Center"
+                               ToolTip="Elige el di&#225;metro y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior)."/>
+                    <!-- Four bar options, each with its own diameter (editable, remembered) -->
+                    <RadioButton x:Name="rb_bar_1" GroupName="tool" Content="&#216;" Margin="4,0,2,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <ComboBox x:Name="cbo_bar_1" Width="62" Margin="0,0,8,0" SelectionChanged="bar_slot_changed"
+                              ToolTip="Diametro de esta opcion: elige el que uses; se recuerda la proxima vez."/>
+                    <RadioButton x:Name="rb_bar_2" GroupName="tool" Content="&#216;" Margin="0,0,2,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <ComboBox x:Name="cbo_bar_2" Width="62" Margin="0,0,8,0" SelectionChanged="bar_slot_changed"
+                              ToolTip="Diametro de esta opcion: elige el que uses; se recuerda la proxima vez."/>
+                    <RadioButton x:Name="rb_bar_3" GroupName="tool" Content="&#216;" Margin="0,0,2,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <ComboBox x:Name="cbo_bar_3" Width="62" Margin="0,0,8,0" SelectionChanged="bar_slot_changed"
+                              ToolTip="Diametro de esta opcion: elige el que uses; se recuerda la proxima vez."/>
+                    <RadioButton x:Name="rb_bar_4" GroupName="tool" Content="&#216;" Margin="0,0,2,0"
+                                 VerticalAlignment="Center" Checked="tool_changed"/>
+                    <ComboBox x:Name="cbo_bar_4" Width="62" Margin="0,0,8,0" SelectionChanged="bar_slot_changed"
+                              ToolTip="Diametro de esta opcion: elige el que uses; se recuerda la proxima vez."/>
+                </WrapPanel>
+                <TextBlock DockPanel.Dock="Top" x:Name="txt_status" Foreground="#FFC0392B" FontWeight="Bold"
+                           TextWrapping="Wrap" Margin="0,0,0,4" Visibility="Collapsed"/>
+                <!-- Measures of the selected stirrup (outer face, cm) -->
+                <Border DockPanel.Dock="Top" x:Name="panel_measures" Visibility="Collapsed" Margin="0,0,0,4"
+                        Padding="6,4,6,4" Background="#FFEAF2FC" BorderBrush="#FF9DBEE8" BorderThickness="1">
+                    <WrapPanel>
+                        <TextBlock x:Name="txt_measures_title" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0"
+                                   Text="Estribo seleccionado - medidas exteriores (cm):"/>
+                        <StackPanel x:Name="panel_rect_fields" Orientation="Horizontal">
+                            <TextBlock Text="Ancho " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_m_width" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
+                            <TextBlock Text="Alto " VerticalAlignment="Center"/>
+                            <TextBox x:Name="txt_m_height" Width="48" Margin="0,0,8,0" KeyDown="measure_key"/>
+                            <Button Content="Aplicar" Width="65" Click="measures_apply"
+                                    ToolTip="Cambia el tama&#241;o alrededor de su centro, sin salir del recubrimiento."/>
+                        </StackPanel>
+                        <!-- Open stirrups: one box per segment (filled in code) -->
+                        <StackPanel x:Name="panel_segments" Orientation="Horizontal"
+                                    ToolTip="Cambia un tramo y pulsa Aplicar (o Enter): crece en su misma direccion y lo que sigue se desplaza, sin cambiar los angulos."/>
+                        <TextBlock x:Name="txt_m_sides" VerticalAlignment="Center" Foreground="#FF404040"/>
+                        <Button Content="Eliminar estribo" Width="110" Margin="12,0,0,0" Foreground="#FFC0392B"
+                                Click="delete_stirrup_click"
+                                ToolTip="Borra el estribo seleccionado (tecla Supr). Deshacer lo recupera."/>
+                    </WrapPanel>
+                </Border>
+                <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
+                           Text="Estribo cerrado: clic en cada barra que abraza y clic derecho (o clic en la primera) para cerrarlo; abierto (U): clic en cada punto y clic derecho para terminarlo sin cerrar. Esc cancela el trazo. Mediante dos puntos: clic en dos esquinas opuestas. Al crear un estribo (o con Editar) aparecen sus medidas para modificarlas. Grapa: un clic donde la quieres; se coloca sola entre las dos barras enfrentadas mas cercanas. En '&#216; acero' eliges si usa el estribo de borde (naranja) o de confinamiento (verde). Barras: elige una de las 4 opciones (el di&#225;metro de cada una se cambia en su lista y se recuerda) y haz clic en la planta donde va cada barra (cerca de un estribo se pega a su cara interior); Borrar quita una barra. Los puntos se ajustan a las barras y a 1 cm. Forma: clic en una forma de armadura (panel derecho) y dibuja el estribo; se crea con esa forma. El boceto se guarda con 'Guardar configuracion' en los tipos marcados de la misma seccion."/>
+                <!-- Three views: 3D (large, left), elevation and plan (the sketch). Mouse wheel
+                     zooms, middle button drag pans, "Ajustar" refits; in 3D a
+                     left drag orbits. -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.15*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Grid.Column="1" Grid.Row="1">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                            <Button DockPanel.Dock="Right" Content="Ajustar" Width="60" Click="plan_fit_click"/>
+                            <TextBlock Text="PLANTA" FontWeight="Bold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <Border BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White" ClipToBounds="True">
+                            <Canvas x:Name="canvas" Background="White"
+                                    MouseLeftButtonDown="canvas_left" MouseRightButtonDown="canvas_right"
+                                    MouseMove="canvas_move" SizeChanged="canvas_resized"
+                                    MouseWheel="plan_wheel" MouseDown="plan_mouse_down" MouseUp="plan_mouse_up"/>
+                        </Border>
+                    </DockPanel>
+
+                    <DockPanel Grid.Column="1" Grid.Row="0" Margin="0,0,0,6">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                            <Button DockPanel.Dock="Right" Content="Ajustar" Width="60" Click="elev_fit_click"/>
+                            <TextBlock Text="ALZADO" FontWeight="Bold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <Border BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White" ClipToBounds="True">
+                            <Canvas x:Name="canvas_elev" Background="White" SizeChanged="elev_resized"
+                                    MouseWheel="elev_wheel" MouseDown="elev_mouse_down" MouseUp="elev_mouse_up"
+                                    MouseMove="elev_mouse_move"/>
+                        </Border>
+                    </DockPanel>
+
+                    <DockPanel Grid.Column="0" Grid.RowSpan="2" Margin="0,0,6,0">
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,2">
+                            <Button DockPanel.Dock="Right" Content="Ajustar" Width="60" Click="view3d_fit_click"/>
+                            <ComboBox DockPanel.Dock="Right" x:Name="cbo_detail" Width="80" Margin="0,0,6,0"
+                                      SelectionChanged="detail_changed"/>
+                            <TextBlock DockPanel.Dock="Right" Text="Nivel de detalle: " VerticalAlignment="Center"/>
+                            <TextBlock Text="VISTA 3D" FontWeight="Bold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                            <TextBlock DockPanel.Dock="Left" Text="Columna: " VerticalAlignment="Center"/>
+                            <ComboBox x:Name="cbo_view_column" SelectionChanged="view_column_changed"
+                                      ToolTip="Cual de las columnas de este tipo se ve en la vista 3D y el alzado; entre parentesis, lo que toca (viga, losa, zapata)."/>
+                        </DockPanel>
+                        <Border x:Name="border3d" BorderBrush="#FF9A9A9A" BorderThickness="1" Background="White"
+                                ClipToBounds="True"
+                                MouseWheel="view3d_wheel" MouseDown="view3d_mouse_down" MouseUp="view3d_mouse_up"
+                                MouseMove="view3d_mouse_move" SizeChanged="view3d_resized">
+                            <Viewport3D x:Name="view3d"/>
+                        </Border>
+                    </DockPanel>
+                </Grid>
+            </DockPanel>
+
+            <!-- Right: rebar shape browser, always shown -->
+            <GroupBox Grid.Column="2" Header="Formas de armadura" Margin="10,0,0,0" Padding="4">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <TextBlock Text="Buscar: " VerticalAlignment="Center"/>
+                        <TextBox x:Name="txt_shape_filter" TextChanged="shape_filter_changed"/>
+                    </DockPanel>
+                    <CheckBox DockPanel.Dock="Top" x:Name="chk_shape_stirrups" Content="Solo formas de estribo"
+                              IsChecked="False" Margin="0,0,0,4" Click="shape_filter_changed"/>
+                    <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                        <Button Content="Quitar forma elegida" Height="28" Margin="0,0,0,4"
+                                Click="shape_clear_click"
+                                ToolTip="Los estribos y grapas que dibujes despues toman la forma que Revit elija."/>
+                        <Button Content="Cargar forma (.rfa)..." Height="26" Click="shape_load_click"/>
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Bottom" TextWrapping="Wrap" Foreground="Gray" FontSize="11" Margin="0,4,0,0"
+                               Text="Clic en una forma para elegirla y luego dibuja el estribo en la planta: se crea con esa forma en Revit. Una forma recta (con ganchos) se usa para las grapas."/>
+                    <ListBox x:Name="list_shapes" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             SelectionChanged="shape_selected"/>
+                </DockPanel>
+            </GroupBox>
+        </Grid>
+    </DockPanel>
+</Window>

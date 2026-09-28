@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import sys
 import httpx
 import anyio
@@ -9,8 +10,8 @@ from typing import Optional, Dict, Any, Union
 # Create a generic MCP server for interacting with Revit
 # Use stateless_http=True and json_response=True for better compatibility
 mcp = FastMCP(
-    "Revit MCP Server", 
-    host="127.0.0.1", 
+    "Revit MCP Server",
+    host="127.0.0.1",
     port=8000,
     stateless_http=True,
     json_response=True
@@ -18,7 +19,10 @@ mcp = FastMCP(
 
 # Configuration
 REVIT_HOST = "127.0.0.1"
-REVIT_PORT = 48884
+# pyRevit's Routes server picks the next free port (48884, 48885, ...) when
+# more than one Revit instance is running. Override with REVIT_MCP_PORT to
+# point this server at a specific one.
+REVIT_PORT = int(os.environ.get("REVIT_MCP_PORT", "48884"))
 BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/revit_mcp"
 
 

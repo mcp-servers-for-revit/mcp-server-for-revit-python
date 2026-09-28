@@ -1,0 +1,113 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Encofrado - Categorias a procesar"
+        SizeToContent="Height" Width="500" MinWidth="420" MinHeight="300"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip">
+    <!-- Resizable: the options scroll when the window is made smaller;
+         "Continuar" stays pinned at the bottom. -->
+    <DockPanel Margin="15">
+    <Button DockPanel.Dock="Bottom" x:Name="button_continue" Content="Continuar" Height="34" Margin="0,12,0,0" Click="continue_click"/>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <Grid Margin="0,0,4,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Selecciona las categorias a procesar. Todos sus elementos se incluyen siempre; el material es solo para identificar el tipo de encofrado usado (madera, metalico, aluminio, etc.), no filtra elementos."/>
+
+        <Grid Grid.Row="1" Margin="0,0,0,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Categoria" FontWeight="Bold"/>
+            <TextBlock Grid.Column="1" Text="Material del encofrado (opcional)" FontWeight="Bold"/>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="34"/>
+            </Grid.RowDefinitions>
+
+            <CheckBox x:Name="chk_columns" Grid.Row="0" Grid.Column="0" Content="Columnas" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_columns" Grid.Row="0" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_beams" Grid.Row="1" Grid.Column="0" Content="Vigas" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_beams" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_slabs" Grid.Row="2" Grid.Column="0" Content="Losas" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_slabs" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_walls" Grid.Row="3" Grid.Column="0" Content="Muros" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_walls" Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_foundations" Grid.Row="4" Grid.Column="0" Content="Cimentacion" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_foundations" Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+
+            <CheckBox x:Name="chk_stairs" Grid.Row="5" Grid.Column="0" Content="Escaleras" VerticalAlignment="Center"/>
+            <ComboBox x:Name="cbo_stairs" Grid.Row="5" Grid.Column="1" VerticalAlignment="Center" Margin="0,3,0,3" IsEditable="True" IsTextSearchEnabled="True"/>
+        </Grid>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
+            <Button x:Name="button_select_all" Content="Marcar todo" Width="150" Height="28" Margin="0,0,8,0" Click="select_all_click"/>
+            <Button x:Name="button_select_none" Content="Desmarcar todo" Width="150" Height="28" Click="select_none_click"/>
+        </StackPanel>
+
+        <GroupBox Grid.Row="4" Header="Alcance: que elementos encofrar" Margin="0,12,0,0" Padding="8,6,8,6">
+            <StackPanel>
+                <RadioButton x:Name="rb_scope_model" GroupName="scope" IsChecked="True" Margin="0,2,0,4"
+                             Content="Todo el modelo"/>
+                <Grid Margin="0,2,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <RadioButton x:Name="rb_scope_level" GroupName="scope" Grid.Column="0" VerticalAlignment="Center"
+                                 Content="Por nivel (vaciado)"/>
+                    <ComboBox x:Name="cbo_scope_level" Grid.Column="1" VerticalAlignment="Center"
+                              IsEnabled="{Binding IsChecked, ElementName=rb_scope_level}"/>
+                </Grid>
+                <TextBlock TextWrapping="Wrap" Margin="20,0,0,4" Foreground="Gray" FontSize="11"
+                           Text="Agrupa como el vaciado en obra: vigas, losas y cimentacion de ese nivel, mas las columnas, muros y escaleras que llegan a el desde el nivel de abajo."/>
+                <RadioButton x:Name="rb_scope_pick" GroupName="scope" Margin="0,2,0,2"
+                             Content="Seleccionar elementos en el modelo"/>
+                <TextBlock TextWrapping="Wrap" Margin="20,2,0,0" Foreground="Gray" FontSize="11"
+                           Text="Usa la seleccion actual si ya hay elementos seleccionados; si no, los eliges en la vista al pulsar Continuar (Finalizar para terminar, Esc para cancelar). Solo se aceptan las categorias marcadas."/>
+            </StackPanel>
+        </GroupBox>
+
+        <StackPanel Grid.Row="5" Margin="0,12,0,0">
+            <CheckBox x:Name="chk_soil" IsChecked="True"
+                      Content="Vaciado contra terreno: sin encofrado en caras enterradas bajo el nivel de terreno"/>
+            <TextBlock TextWrapping="Wrap" Margin="20,4,0,0" Foreground="Gray" FontSize="11"
+                       Text="Cimentacion completa bajo el nivel, y caras exteriores de muros/columnas que dan al terreno. Los muros de albanileria nunca llevan encofrado. Este nivel no filtra elementos: para eso usa el Alcance."/>
+            <Grid Margin="20,6,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Nivel de terreno natural" VerticalAlignment="Center"/>
+                <ComboBox x:Name="cbo_ground" Grid.Column="1" VerticalAlignment="Center"
+                          IsEnabled="{Binding IsChecked, ElementName=chk_soil}"/>
+            </Grid>
+        </StackPanel>
+    </Grid>
+    </ScrollViewer>
+    </DockPanel>
+</Window>

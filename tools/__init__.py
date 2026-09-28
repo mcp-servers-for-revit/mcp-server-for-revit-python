@@ -13,6 +13,10 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     from .code_execution_tools import register_code_execution_tools
     from .launch_tools import register_launch_tools
     from .document_tools import register_document_tools
+    from .formwork_tools import register_formwork_tools
+    from .selection_tools import register_selection_tools
+    from .element_management_tools import register_element_management_tools
+    from .annotation_tools import register_annotation_tools
 
     # Register tools from each module
     register_status_tools(mcp_server, revit_get_func)
@@ -25,3 +29,7 @@ def register_tools(mcp_server, revit_get_func, revit_post_func, revit_image_func
     )
     register_launch_tools(mcp_server, revit_get_func)
     register_document_tools(mcp_server, revit_get_func, revit_post_func)
+    register_formwork_tools(mcp_server, revit_get_func, revit_post_func)
+    register_selection_tools(mcp_server, revit_get_func)
+    register_element_management_tools(mcp_server, revit_get_func, revit_post_func)
+    register_annotation_tools(mcp_server, revit_post_func)
