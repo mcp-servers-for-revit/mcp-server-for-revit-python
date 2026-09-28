@@ -1,0 +1,17 @@
+{
+  "manufacturer": "Muovitech",
+  "_source": "MuoviTech UK 'PE Pipe / Pressure Pipe PE100' technical datasheet (SDR11 PN16 dimension table), retrieved 2026-09-21 from muovitech.com/productdocs/UK_pepipe.pdf. Material offered in PE100 and PE100RC per the same datasheet's Product Information section.",
+  "_dimension_note": "The datasheet gives min/max outer diameter and min/max wall thickness tolerances; this catalog uses the minimum (nominal) outer diameter and minimum (eMin, nominal design) wall thickness for each size, consistent with how SDR is defined and matching the convention already used for REHAU's dimension table in this engine.",
+  "_material_conductivity_note": "The datasheet does not publish a pipe-material thermal conductivity value. k_p uses the same industry-standard 0.40 W/m.K value used elsewhere in this engine for PE-family pipe materials (see REHAU's own TB246-sourced note on this) -- not an unsourced Muovitech-specific figure.",
+  "material": "PE100 / PE100-RC",
+  "sdr": 11,
+  "pipes": [
+    {"key": "muovitech_pe100_20x2.0", "name": "Muovitech PE100/PE100-RC 20 x 2.0 mm (SDR11 PN16)", "d_mm": 20.0, "s_mm": 2.0, "r_in_m": 0.0080, "r_out_m": 0.0100, "k_p_W_mK": 0.40},
+    {"key": "muovitech_pe100_25x2.3", "name": "Muovitech PE100/PE100-RC 25 x 2.3 mm (SDR11 PN16)", "d_mm": 25.0, "s_mm": 2.3, "r_in_m": 0.0102, "r_out_m": 0.0125, "k_p_W_mK": 0.40},
+    {"key": "muovitech_pe100_32x3.0", "name": "Muovitech PE100/PE100-RC 32 x 3.0 mm (SDR11 PN16)", "d_mm": 32.0, "s_mm": 3.0, "r_in_m": 0.0130, "r_out_m": 0.0160, "k_p_W_mK": 0.40},
+    {"key": "muovitech_pe100_40x3.7", "name": "Muovitech PE100/PE100-RC 40 x 3.7 mm (SDR11 PN16)", "d_mm": 40.0, "s_mm": 3.7, "r_in_m": 0.0163, "r_out_m": 0.0200, "k_p_W_mK": 0.40},
+    {"key": "muovitech_pe100_50x4.6", "name": "Muovitech PE100/PE100-RC 50 x 4.6 mm (SDR11 PN16)", "d_mm": 50.0, "s_mm": 4.6, "r_in_m": 0.0204, "r_out_m": 0.0250, "k_p_W_mK": 0.40},
+    {"key": "muovitech_pe100_63x5.8", "name": "Muovitech PE100/PE100-RC 63 x 5.8 mm (SDR11 PN16)", "d_mm": 63.0, "s_mm": 5.8, "r_in_m": 0.0257, "r_out_m": 0.0315, "k_p_W_mK": 0.40},
+    {"key": "muovitech_pe100_75x6.8", "name": "Muovitech PE100/PE100-RC 75 x 6.8 mm (SDR11 PN16)", "d_mm": 75.0, "s_mm": 6.8, "r_in_m": 0.0307, "r_out_m": 0.0375, "k_p_W_mK": 0.40}
+  ]
+}

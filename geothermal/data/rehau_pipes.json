@@ -1,0 +1,17 @@
+{
+  "manufacturer": "REHAU",
+  "_source": "REHAU \"Sistema de captacion geotermica RAUGEO PE-Xa - Informacion tecnica\", doc. 827600 ES 10.2024, section 03.02.02 (pipe material/dimension table) and section 08.01 (RAUGEO collect PE-Xa SDR 11 accessory pipe, larger sizes). Retrieved 2026-09-21 from rehau.com/downloads/305376/info-tecnica-raugeo.pdf.",
+  "_material_conductivity_note": "REHAU does not publish a PE-Xa-specific thermal conductivity distinct from generic PE. Their own Technical Bulletin TB246 (Geothermal Modeling with RAUGEO PEXa Pipes, 16-Jan-12) states explicitly: 'The difference in thermal conductivity of HDPE and PEXa material is not included here. The variation in the thermal conductivity values produces a negligible effect in geothermal borehole modeling.' k_p below uses the same industry-standard 0.40 W/m.K value used elsewhere in this engine (matches the pygfunction getting-started report's own worked examples) rather than an unsourced REHAU-specific figure.",
+  "material": "PE-Xa",
+  "sdr": 11,
+  "roughness_mm": 0.007,
+  "pipes": [
+    {"key": "rehau_raugeo_20x1.9", "name": "RAUGEO PE-Xa 20 x 1.9 mm", "d_mm": 20.0, "s_mm": 1.9, "r_in_m": 0.0081, "r_out_m": 0.0100, "k_p_W_mK": 0.40},
+    {"key": "rehau_raugeo_25x2.3", "name": "RAUGEO PE-Xa 25 x 2.3 mm", "d_mm": 25.0, "s_mm": 2.3, "r_in_m": 0.0102, "r_out_m": 0.0125, "k_p_W_mK": 0.40},
+    {"key": "rehau_raugeo_32x2.9", "name": "RAUGEO PE-Xa 32 x 2.9 mm", "d_mm": 32.0, "s_mm": 2.9, "r_in_m": 0.0131, "r_out_m": 0.0160, "k_p_W_mK": 0.40},
+    {"key": "rehau_raugeo_40x3.7", "name": "RAUGEO PE-Xa 40 x 3.7 mm", "d_mm": 40.0, "s_mm": 3.7, "r_in_m": 0.0163, "r_out_m": 0.0200, "k_p_W_mK": 0.40},
+    {"key": "rehau_raugeo_50x4.6", "name": "RAUGEO PE-Xa 50 x 4.6 mm", "d_mm": 50.0, "s_mm": 4.6, "r_in_m": 0.0204, "r_out_m": 0.0250, "k_p_W_mK": 0.40},
+    {"key": "rehau_raugeo_63x5.8", "name": "RAUGEO PE-Xa 63 x 5.8 mm", "d_mm": 63.0, "s_mm": 5.8, "r_in_m": 0.0257, "r_out_m": 0.0315, "k_p_W_mK": 0.40},
+    {"key": "rehau_raugeo_75x6.8", "name": "RAUGEO PE-Xa 75 x 6.8 mm", "d_mm": 75.0, "s_mm": 6.8, "r_in_m": 0.0307, "r_out_m": 0.0375, "k_p_W_mK": 0.40}
+  ]
+}

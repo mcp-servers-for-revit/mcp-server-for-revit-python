@@ -1,0 +1,24 @@
+{
+  "manufacturer": "REHAU",
+  "_source": "REHAU \"Sistema de captacion geotermica RAUGEO PE-Xa - Informacion tecnica\", doc. 827600 ES 10.2024, section 04.04 'Material de relleno RAUGEO fill'. Retrieved 2026-09-21 from rehau.com/downloads/305376/info-tecnica-raugeo.pdf.",
+  "grouts": [
+    {
+      "key": "rehau_raugeo_fill_rojo",
+      "name": "RAUGEO fill rojo (red)",
+      "k_g_W_mK": 2.0,
+      "density_kg_dm3": 1.65,
+      "compressive_strength_28d_N_mm2": 5.5,
+      "water_permeability_m_s": 2.0e-10,
+      "application": "High thermal conductivity, frost-resistant per DIN 52104-A"
+    },
+    {
+      "key": "rehau_raugeo_fill_azul",
+      "name": "RAUGEO fill azul (blue)",
+      "k_g_W_mK": 1.2,
+      "density_kg_dm3": 1.43,
+      "compressive_strength_28d_N_mm2": 4.0,
+      "water_permeability_m_s": 1.0e-9,
+      "application": "Frost-resistant (standard, not high-conductivity)"
+    }
+  ]
+}

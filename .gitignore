@@ -12,3 +12,10 @@ wheels/
 *TODO.md
 .env
 CLAUDE.md
+
+# Revit rolling backups (Revit writes <name>.0001.rvt on every save)
+*.[0-9][0-9][0-9][0-9].rvt
+
+# .NET build output (HC.GeoBore)
+bin/
+obj/

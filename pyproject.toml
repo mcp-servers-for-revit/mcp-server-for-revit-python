@@ -5,11 +5,17 @@ description = "MCP server for Revit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "ghetool>=2.4.1",
     "mcp[cli]>=1.9.0",
+    "pygfunction[plot]==2.3.1",
 ]
 
 [tool.setuptools.packages.find]
-include = ["tools*", "revit_mcp*"]
+include = ["tools*", "revit_mcp*", "hydraulics*", "geothermal*"]
+
+[tool.setuptools.package-data]
+hydraulics = ["data/*.json"]
+geothermal = ["data/*.json"]
 
 [project.optional-dependencies]
 test = [

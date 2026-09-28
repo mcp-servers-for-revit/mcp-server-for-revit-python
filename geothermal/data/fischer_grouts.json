@@ -1,0 +1,22 @@
+{
+  "manufacturer": "Fischer Spezialbaustoffe",
+  "_source": "Fischer GeoSolid 240HS official technical datasheet (English), retrieved 2026-09-21 from fischer-spezialbaustoffe.de/wp-content/uploads/2020/11/FSB_Technisches_Datenblatt_GeoSolid_1120_EN.pdf, cross-checked against the German-language version (Stand 26.05.2020, same publisher). GeoSolid 235's thermal conductivity (>=2.35 W/mK) is corroborated by multiple independent citations of Fischer's own published figures, but Fischer's current product site only actively publishes a full datasheet for 240HS -- GeoSolid 235 and 240 (non-HS) appear to be other tiers of the same product line not currently detailed with a full property table on fischer-spezialbaustoffe.de. Density/compressive-strength/water-permeability for GeoSolid 235 specifically were not found in a primary-source datasheet and are omitted here rather than assumed equal to 240HS's.",
+  "_fallback_note": "Included as a fallback grout option for pipe manufacturers in this catalog (Gerodur, Pipelife) that do not appear to sell their own borehole grout -- Gerodur's own product line only includes grouting installation accessories (tubes, packers), not a grout material itself, and no Pipelife-branded grout product was found.",
+  "grouts": [
+    {
+      "key": "fischer_geosolid_240hs",
+      "name": "Fischer GeoSolid 240-HS",
+      "k_g_W_mK": 2.40,
+      "density_kg_dm3": 1.9,
+      "compressive_strength_N_mm2": 10.0,
+      "water_permeability_m_s": 1.0e-9,
+      "application": "Thermally optimised backfill for geothermal probes in sulphate-aggressive groundwater; frost-resistant per DIN CEN/TS 12390-9"
+    },
+    {
+      "key": "fischer_geosolid_235",
+      "name": "Fischer GeoSolid 235",
+      "k_g_W_mK": 2.35,
+      "application": "Standard-tier GeoSolid backfill for geothermal probes; frost-resistant. Density/compressive-strength/water-permeability not found in a primary Fischer datasheet for this specific variant -- only thermal conductivity is independently sourced."
+    }
+  ]
+}

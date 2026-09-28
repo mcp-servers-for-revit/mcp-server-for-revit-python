@@ -1,0 +1,14 @@
+{
+  "manufacturer": "Pipelife Bulgaria",
+  "_source": "Pipelife online product catalog, PE100 PN16 SDR11 pressure pipe dimension table (catalog.pipelife.com/pl-en/articlelist/pe-80-i-pe-100-198966/193405/pe100-s-1w-sdr11-blue), retrieved 2026-09-21. Pipelife Bulgaria (pipelife.bg) did not have a dedicated geothermal-probe-branded product page at time of retrieval; this uses Pipelife's group-wide PE100 SDR11 PN16 pressure pipe catalog, the material/dimension class used for geothermal probe installation.",
+  "_material_note": "The fetched catalog entry lists this dimension series as PE100 (not explicitly labelled PE100-RC on that page). PE100-RC of the same SDR/nominal diameter has IDENTICAL wall-thickness dimensions to PE100 -- 'RC' denotes a crack-resistance material grade, not a different dimensional standard -- so these dimensions apply equally to Pipelife's PE100-RC grade. Pipelife's own technical catalog ('Systemy cisnieniowe PVC, PE, PE 100 RC', pipelife.pl) confirms PE100-RC is offered within the same SDR dimension system.",
+  "_material_conductivity_note": "No pipe-material thermal conductivity is published in the fetched catalog entry. k_p uses the same industry-standard 0.40 W/m.K value used elsewhere in this engine for PE-family pipe materials -- not an unsourced Pipelife-specific figure.",
+  "material": "PE100 / PE100-RC",
+  "sdr": 11,
+  "pipes": [
+    {"key": "pipelife_pe100_32x3.0", "name": "Pipelife PE100/PE100-RC 32 x 3.0 mm (SDR11 PN16)", "d_mm": 32.0, "s_mm": 3.0, "r_in_m": 0.0130, "r_out_m": 0.0160, "k_p_W_mK": 0.40},
+    {"key": "pipelife_pe100_40x3.7", "name": "Pipelife PE100/PE100-RC 40 x 3.7 mm (SDR11 PN16)", "d_mm": 40.0, "s_mm": 3.7, "r_in_m": 0.0163, "r_out_m": 0.0200, "k_p_W_mK": 0.40},
+    {"key": "pipelife_pe100_50x4.6", "name": "Pipelife PE100/PE100-RC 50 x 4.6 mm (SDR11 PN16)", "d_mm": 50.0, "s_mm": 4.6, "r_in_m": 0.0204, "r_out_m": 0.0250, "k_p_W_mK": 0.40},
+    {"key": "pipelife_pe100_63x5.8", "name": "Pipelife PE100/PE100-RC 63 x 5.8 mm (SDR11 PN16)", "d_mm": 63.0, "s_mm": 5.8, "r_in_m": 0.0257, "r_out_m": 0.0315, "k_p_W_mK": 0.40}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "manufacturer": "Muovitech",
+  "_source": "MuoviTech UK 'MuoviTeco 2.0 Grout' technical datasheet, retrieved 2026-09-21 from muovitech.com/productdocs/UK_muoviteco2.pdf.",
+  "grouts": [
+    {
+      "key": "muovitech_muoviteco_2.0",
+      "name": "MuoviTeco 2.0 Grout",
+      "k_g_W_mK": 2.0,
+      "density_kg_dm3": 1.67,
+      "water_permeability_m_s": 1.0e-9,
+      "application": "Cement-free bentonite-silica blend, non-hardening slurry; long-term stability and resistance to drying out"
+    }
+  ]
+}

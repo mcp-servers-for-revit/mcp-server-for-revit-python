@@ -1,0 +1,72 @@
+<Window x:Class="HC.GeoBore.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings"
+        Width="480" Height="460"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Icon="Resources/app.ico">
+    <StackPanel Margin="16">
+
+        <GroupBox Header="Engine" Margin="0,0,0,10">
+            <StackPanel Margin="8">
+                <TextBlock Text="Python interpreter currently in use:" />
+                <TextBlock x:Name="CurrentEnginePathText" TextWrapping="Wrap" FontFamily="Consolas" Margin="0,2,0,8" />
+                <TextBlock Text="Override (blank = auto-detect the repo's own .venv):" />
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox Grid.Column="0" x:Name="EngineOverrideBox" />
+                    <Button Grid.Column="1" Content="Browse..." Margin="6,0,0,0" Padding="8,0" Click="BrowseEngineButton_Click" />
+                </Grid>
+                <TextBlock Text="Takes effect the next time the engine is called (not mid-session)." FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,8" />
+                <Button Content="Test Connection" HorizontalAlignment="Left" Padding="8,2" Click="TestConnectionButton_Click" />
+                <TextBlock x:Name="TestConnectionResultText" TextWrapping="Wrap" Margin="0,6,0,0" />
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="Flow auto-calc defaults" Margin="0,0,0,10">
+            <StackPanel Margin="8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                        <Label Content="Design delta-T (C)" Padding="0" />
+                        <TextBox x:Name="FlowDeltaTBox" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                        <Label Content="Min Reynolds" Padding="0" />
+                        <TextBox x:Name="FlowMinReynoldsBox" />
+                    </StackPanel>
+                </Grid>
+                <TextBlock Text="Used by Flow per borehole's Auto-calc button -- see geothermal/README.md's flow-rate section."
+                           TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,6,0,0" />
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="Autosave" Margin="0,0,0,10">
+            <StackPanel Margin="8">
+                <CheckBox x:Name="AutosaveEnabledCheckBox" Content="Autosave the open project" />
+                <Grid Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="60" />
+                    </Grid.ColumnDefinitions>
+                    <Label Grid.Column="0" Content="Every (minutes)" Padding="0" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="1" x:Name="AutosaveIntervalBox" Margin="6,0,0,0" />
+                </Grid>
+                <TextBlock Text="Only autosaves once a project has been saved/opened at least once (needs a file path)."
+                           TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,6,0,0" />
+            </StackPanel>
+        </GroupBox>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,0">
+            <Button Content="Cancel" Width="80" Margin="0,0,8,0" Click="CancelButton_Click" IsCancel="True" />
+            <Button Content="OK" Width="80" Click="OkButton_Click" IsDefault="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

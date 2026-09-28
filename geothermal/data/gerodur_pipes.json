@@ -1,0 +1,13 @@
+{
+  "manufacturer": "Gerodur",
+  "_source": "Gerodur GEROtherm DUPLEX geothermal probe product page (dimension table), retrieved 2026-09-21 from gerodur.de/en/gerotherm-duplex/. Material confirmed as PE100-RC (RC = resistance to crack) on the same page.",
+  "_material_conductivity_note": "Gerodur's product page does not publish a pipe-material thermal conductivity value. Following the same reasoning REHAU's own Technical Bulletin TB246 documents for PE-Xa (negligible difference vs. generic PE for geothermal modeling purposes), k_p uses the same industry-standard 0.40 W/m.K value used elsewhere in this engine for PE-family pipe materials -- not an unsourced Gerodur-specific figure.",
+  "material": "PE100-RC",
+  "pipes": [
+    {"key": "gerodur_gerotherm_duplex_32x3.0", "name": "GEROtherm DUPLEX PE100-RC 32 x 3.0 mm (SDR11 PN16)", "d_mm": 32.0, "s_mm": 3.0, "r_in_m": 0.0130, "r_out_m": 0.0160, "k_p_W_mK": 0.40},
+    {"key": "gerodur_gerotherm_duplex_40x3.7", "name": "GEROtherm DUPLEX PE100-RC 40 x 3.7 mm (SDR11 PN16)", "d_mm": 40.0, "s_mm": 3.7, "r_in_m": 0.0163, "r_out_m": 0.0200, "k_p_W_mK": 0.40},
+    {"key": "gerodur_gerotherm_duplex_40x4.5", "name": "GEROtherm DUPLEX PE100-RC 40 x 4.5 mm (SDR9 PN20)", "d_mm": 40.0, "s_mm": 4.5, "r_in_m": 0.0155, "r_out_m": 0.0200, "k_p_W_mK": 0.40},
+    {"key": "gerodur_gerotherm_duplex_50x4.6", "name": "GEROtherm DUPLEX PE100-RC 50 x 4.6 mm (SDR11 PN16)", "d_mm": 50.0, "s_mm": 4.6, "r_in_m": 0.0204, "r_out_m": 0.0250, "k_p_W_mK": 0.40},
+    {"key": "gerodur_gerotherm_duplex_50x5.6", "name": "GEROtherm DUPLEX PE100-RC 50 x 5.6 mm (SDR9 PN20)", "d_mm": 50.0, "s_mm": 5.6, "r_in_m": 0.0194, "r_out_m": 0.0250, "k_p_W_mK": 0.40}
+  ]
+}

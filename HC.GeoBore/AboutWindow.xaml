@@ -1,0 +1,20 @@
+<Window x:Class="HC.GeoBore.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="About GeoBore"
+        Width="420" Height="300"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Icon="Resources/app.ico">
+    <StackPanel Margin="20">
+        <TextBlock Text="GeoBore" FontWeight="Bold" FontSize="22" />
+        <TextBlock x:Name="VersionText" Text="Version 0.1" Foreground="Gray" Margin="0,2,0,0" />
+        <TextBlock TextWrapping="Wrap" Margin="0,16,0,0"
+                   Text="Geothermal borehole field design: g-function calculation, hourly simulation, depth sizing, area+peak-load quick sizing, and hybrid cooling tower / dry cooler sizing." />
+        <TextBlock TextWrapping="Wrap" Margin="0,10,0,0"
+                   Text="Built on pygfunction (Cimmino et al.) for the g-function and thermal response math, with GHEtool available as an optional cross-check for sizing." />
+        <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" FontStyle="Italic" Foreground="Gray"
+                   Text="See geothermal/README.md in the repo for the full architecture and validation notes." />
+        <Button Content="OK" Width="80" HorizontalAlignment="Right" Margin="0,20,0,0" Click="OkButton_Click" IsDefault="True" />
+    </StackPanel>
+</Window>
