@@ -54,7 +54,7 @@ def build_network(
     field: FieldDict, pipe_config: dict[str, Any], k_s: float, k_g: float,
     m_flow_network: float, fluid_str: str, fluid_percent: float, fluid_temperature_C: float,
     bore_connectivity: Optional[list[int]] = None, reversible_flow: bool = True,
-    epsilon: float = 1.0e-6,
+    epsilon: float = 1.0e-6, multipole_order: int = 2,
 ) -> gt.networks.Network:
     bf = to_borefield(field)
     boreholes = bf.to_boreholes()
@@ -66,7 +66,7 @@ def build_network(
         boreholes, pipe_type_str, pipe_config["pos"], pipe_config["r_in"], pipe_config["r_out"],
         k_s, k_g, pipe_config["k_p"], m_flow_network, epsilon,
         fluid_str, fluid_percent, fluid_temperature_C,
-        reversible_flow=reversible_flow, bore_connectivity=bore_connectivity,
+        reversible_flow=reversible_flow, bore_connectivity=bore_connectivity, J=multipole_order,
     )
 
 
@@ -75,7 +75,7 @@ def evaluate(
     m_flow_network: float, k_s: float, k_g: float,
     fluid_str: str, fluid_percent: float, fluid_temperature_C: float,
     bore_connectivity: Optional[list[int]] = None, reversible_flow: bool = True,
-    method: str = "equivalent",
+    method: str = "equivalent", multipole_order: int = 2,
 ) -> dict[str, Any]:
     """MIFT g-function for an arbitrary parallel/series/mixed network.
 
@@ -86,11 +86,15 @@ def evaluate(
     and only warns via the Python warnings module, which a GUI would never
     see; this wrapper does that substitution itself up front and reports it
     in the result instead.
+
+    multipole_order: pygfunction's own J parameter (default 2, matching
+    pipes.build_pipe's own default) -- see that function's docstring.
     """
     if method not in SOLVERS:
         raise ValueError(f"unknown method {method!r}, expected one of {SOLVERS}")
     network = build_network(field, pipe_config, k_s, k_g, m_flow_network, fluid_str, fluid_percent,
-                             fluid_temperature_C, bore_connectivity, reversible_flow)
+                             fluid_temperature_C, bore_connectivity, reversible_flow,
+                             multipole_order=multipole_order)
 
     method_used = method
     if method == "equivalent" and not _is_parallel(bore_connectivity):
@@ -158,11 +162,13 @@ def effective_network_resistance(
     field: FieldDict, pipe_config: dict[str, Any], k_s: float, k_g: float,
     m_flow_network: float, fluid_str: str, fluid_percent: float, fluid_temperature_C: float,
     bore_connectivity: Optional[list[int]] = None, reversible_flow: bool = True,
+    multipole_order: int = 2,
 ) -> dict[str, Any]:
     """Network-level effective thermal resistance -- like pipes.effective_resistance's
     R_b*, but accounting for the whole network's connection topology rather
     than one representative borehole."""
     network = build_network(field, pipe_config, k_s, k_g, m_flow_network, fluid_str, fluid_percent,
-                             fluid_temperature_C, bore_connectivity, reversible_flow)
+                             fluid_temperature_C, bore_connectivity, reversible_flow,
+                             multipole_order=multipole_order)
     R = gt.networks.network_thermal_resistance(network, m_flow_network, network.cp_f)
     return {"network_thermal_resistance_mK_W": float(R), "m_flow_network_kg_s": m_flow_network}

@@ -117,3 +117,69 @@ def test_suggest_flow_rate_rejects_non_positive_min_reynolds():
         pipes.suggest_flow_rate_kg_s(
             capacity_W=1000.0, config=SINGLE_U, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0,
             min_reynolds=0.0)
+
+
+# ---- multipole order / internal (R_a) resistance reporting ---------------
+# Phase 1 accuracy audit item 7: multipole order was hardcoded to pygfunction's
+# own default with no way to raise it, and the internal pipe-to-pipe coupling
+# resistance (R_a, aka R_12 in classic 2-resistance-network TRT literature) was
+# computed by pygfunction internally but never surfaced as a reported value.
+
+def test_default_multipole_order_is_two_and_matches_explicit_j_equals_two():
+    implicit = pipes.effective_resistance(
+        SINGLE_U, m_flow_borehole=0.30, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0, **COMMON_KWARGS)
+    explicit = pipes.effective_resistance(
+        SINGLE_U, m_flow_borehole=0.30, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0,
+        multipole_order=2, **COMMON_KWARGS)
+    assert implicit["R_b_star_mK_W"] == explicit["R_b_star_mK_W"]
+    assert implicit["multipole_order"] == 2
+
+
+def test_single_u_tube_reports_r_a_as_the_off_diagonal_delta_resistance():
+    result = pipes.effective_resistance(
+        SINGLE_U, m_flow_borehole=0.30, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0, **COMMON_KWARGS)
+
+    assert result["R_a_mK_W"] is not None
+    assert result["R_a_mK_W"] > 0
+    R_delta = result["R_delta_mK_W"]
+    assert len(R_delta) == 2 and len(R_delta[0]) == 2
+    assert R_delta[0][1] == pytest.approx(result["R_a_mK_W"])
+    assert R_delta[0][1] == pytest.approx(R_delta[1][0])  # symmetric
+
+
+def test_double_u_tube_reports_a_four_by_four_delta_matrix_but_no_scalar_r_a():
+    # R_a is only a well-defined single scalar for a 2-leg (single U-tube) network --
+    # a double U-tube has 6 distinct pairwise leg resistances, so no one number stands in.
+    result = pipes.effective_resistance(
+        DOUBLE_U_PARALLEL, m_flow_borehole=0.60, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0,
+        **COMMON_KWARGS)
+    assert result["R_a_mK_W"] is None
+    assert len(result["R_delta_mK_W"]) == 4
+
+
+def test_coaxial_reports_no_delta_resistance():
+    # Coaxial's internal resistance network is radial (inner-to-outer annulus), not a
+    # multipole leg network -- thermal_resistances() does not apply to it the same way.
+    coaxial = {"type": "coaxial", "r_in": [0.02, 0.03], "r_out": [0.025, 0.032], "k_p": [0.4, 0.4]}
+    result = pipes.effective_resistance(
+        coaxial, m_flow_borehole=0.30, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0, **COMMON_KWARGS)
+    assert result["R_delta_mK_W"] is None
+    assert result["R_a_mK_W"] is None
+    assert result["R_b_star_mK_W"] > 0  # the actual resistance calc is unaffected
+
+
+def test_raising_multipole_order_converges_toward_a_stable_r_b_star():
+    # J=0 (pygfunction's own "line source approximation") should sit measurably apart from
+    # the higher orders, while J=2 and J=3 should already be close to each other --
+    # matching pygfunction's own documented guidance that J=1/2 usually suffices.
+    r_j0 = pipes.effective_resistance(
+        SINGLE_U, m_flow_borehole=0.30, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0,
+        multipole_order=0, **COMMON_KWARGS)["R_b_star_mK_W"]
+    r_j2 = pipes.effective_resistance(
+        SINGLE_U, m_flow_borehole=0.30, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0,
+        multipole_order=2, **COMMON_KWARGS)["R_b_star_mK_W"]
+    r_j3 = pipes.effective_resistance(
+        SINGLE_U, m_flow_borehole=0.30, fluid_str="MPG", fluid_percent=25.0, fluid_temperature_C=5.0,
+        multipole_order=3, **COMMON_KWARGS)["R_b_star_mK_W"]
+
+    assert abs(r_j2 - r_j3) < abs(r_j0 - r_j2)

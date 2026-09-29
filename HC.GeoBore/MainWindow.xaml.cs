@@ -36,6 +36,30 @@ public sealed class YearlySummaryRow
     public double TWallMaxC { get; init; }
 }
 
+public sealed class TrtRow
+{
+    public int Hour { get; init; }
+    public double QKW { get; set; }
+    public double TFMeasuredC { get; set; }
+}
+
+public sealed class GroundLayerRow
+{
+    public double TopM { get; set; }
+    public double BottomM { get; set; }
+    public double KS { get; set; }
+    public double RhoCp { get; set; }
+    // Null (blank cell) means "not supplied" -- geothermal.ground.weighted_average_ground_properties
+    // requires EITHER every layer to have one or none of them, never a partial mix.
+    public double? TgC { get; set; }
+}
+
+public sealed class CopCurveRow
+{
+    public double EftC { get; set; }
+    public double Cop { get; set; }
+}
+
 public partial class MainWindow : Window
 {
     private const double SecondsPerYear = 8760.0 * 3600.0;
@@ -43,6 +67,7 @@ public partial class MainWindow : Window
     private const int GfunctionTabIndex = 0;
     private const int SizingTabIndex = 2;
     private const int AreaSizingTabIndex = 3;
+    private const int TrtTabIndex = 4;
 
     private static readonly string[] MonthNames =
         { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
@@ -57,6 +82,10 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<GfunctionRow> _rows = new();
     private readonly ObservableCollection<MonthlyLoadRow> _loadRows = new();
     private readonly ObservableCollection<YearlySummaryRow> _simYearlyRows = new();
+    private readonly ObservableCollection<TrtRow> _trtRows = new();
+    private readonly ObservableCollection<GroundLayerRow> _groundLayerRows = new();
+    private readonly ObservableCollection<CopCurveRow> _heatPumpHeatingCurveRows = new();
+    private readonly ObservableCollection<CopCurveRow> _heatPumpCoolingCurveRows = new();
     private List<JsonElement> _pipeCatalog = new();
     private List<JsonElement> _groutCatalog = new();
     private List<JsonElement> _currentPipeProducts = new();
@@ -72,10 +101,27 @@ public partial class MainWindow : Window
         ResultsGrid.ItemsSource = _rows;
         LoadGrid.ItemsSource = _loadRows;
         Sim_YearlyGrid.ItemsSource = _simYearlyRows;
+        TrtGrid.ItemsSource = _trtRows;
+        GroundLayerGrid.ItemsSource = _groundLayerRows;
+        HeatPumpHeatingCurveGrid.ItemsSource = _heatPumpHeatingCurveRows;
+        HeatPumpCoolingCurveGrid.ItemsSource = _heatPumpCoolingCurveRows;
         InitializeCharts();
 
         foreach (var row in BuildDefaultMonthlyLoadRows())
             _loadRows.Add(row);
+        foreach (var row in BuildExampleTrtRows())
+            _trtRows.Add(row);
+        // Clearly-marked example log (2 layers), just so the grid opens runnable -- same
+        // precedent as BuildExampleTrtRows. Replace with a real geological log before relying
+        // on this.
+        _groundLayerRows.Add(new GroundLayerRow { TopM = 0.0, BottomM = 20.0, KS = 1.5, RhoCp = 2.2e6, TgC = 10.0 });
+        _groundLayerRows.Add(new GroundLayerRow { TopM = 20.0, BottomM = 200.0, KS = 3.0, RhoCp = 2.5e6, TgC = 13.0 });
+        // Clearly-made-up but plausible example COP curves, same "runnable out of the box,
+        // replace before relying on it" precedent as the other example data grids above.
+        foreach (var (eft, cop) in new[] { (-5.0, 3.0), (0.0, 3.5), (10.0, 4.5), (20.0, 5.5) })
+            _heatPumpHeatingCurveRows.Add(new CopCurveRow { EftC = eft, Cop = cop });
+        foreach (var (eft, cop) in new[] { (10.0, 4.0), (20.0, 5.0), (30.0, 6.0), (40.0, 4.5) })
+            _heatPumpCoolingCurveRows.Add(new CopCurveRow { EftC = eft, Cop = cop });
 
         try
         {
@@ -106,6 +152,19 @@ public partial class MainWindow : Window
                 PeakCoolingKW = DefaultPeakCooling[i],
             });
         }
+        return rows;
+    }
+
+    // Placeholder shape for a 48-hour constant-injection TRT (asymptotic log-time rise, as
+    // line-source theory predicts) -- clearly example data, not a real test, per the tab's own
+    // hint text; replace before running on a real project.
+    private static List<TrtRow> BuildExampleTrtRows()
+    {
+        const double exampleTG = 12.0;
+        const double exampleQKW = -8.0;
+        var rows = new List<TrtRow>();
+        for (var h = 1; h <= 48; h++)
+            rows.Add(new TrtRow { Hour = h, QKW = exampleQKW, TFMeasuredC = Math.Round(exampleTG + 3.2 * Math.Log(h + 1), 2) });
         return rows;
     }
 
@@ -165,19 +224,62 @@ public partial class MainWindow : Window
         DepthBox.IsEnabled = !isSizing && !isAreaSizing;
         DepthHintText.Visibility = (isSizing || isAreaSizing) ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
 
-        // N1/N2 are derived from the available area on Area Sizing, not entered directly.
-        N1Box.IsEnabled = !isAreaSizing;
-        N2Box.IsEnabled = !isAreaSizing;
-        N1N2HintText.Visibility = isAreaSizing ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        var isTrt = index == TrtTabIndex;
+        // N1/N2 are derived from the available area on Area Sizing, not entered directly; TRT is a
+        // single test borehole, so a field layout doesn't apply there either.
+        N1Box.IsEnabled = !isAreaSizing && !isTrt;
+        N2Box.IsEnabled = !isAreaSizing && !isTrt;
+        N1N2HintText.Text = isTrt
+            ? "(ignored on TRT Analysis -- a TRT is run on one test borehole, not a field)"
+            : "(ignored on Area Sizing -- derived from area there instead)";
+        N1N2HintText.Visibility = (isAreaSizing || isTrt) ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
 
         var isGfunction = index == GfunctionTabIndex;
-        // The monthly load grid has no role on g-Function (no load concept) or Area Sizing
-        // (which synthesizes its own load from the two peak values instead).
-        LoadProfileGroup.IsEnabled = !isGfunction && !isAreaSizing;
+        // The monthly load grid has no role on g-Function (no load concept), Area Sizing (which
+        // synthesizes its own load from the two peak values instead), or TRT (its own log-data
+        // grid replaces it).
+        LoadProfileGroup.IsEnabled = !isGfunction && !isAreaSizing && !isTrt;
         // The tower group is a manual "what if" input on Simulation/Sizing; on Area Sizing the
-        // tower capacity (if any) is instead a solved-for output, shown in that tab's results.
-        TowerGroup.IsEnabled = !isGfunction && !isAreaSizing;
+        // tower capacity (if any) is instead a solved-for output, shown in that tab's results; TRT
+        // doesn't run a tower at all.
+        TowerGroup.IsEnabled = !isGfunction && !isAreaSizing && !isTrt;
+        // MIFT/UBWT choice only applies where this engine actually sizes/simulates against a
+        // g-function -- not on g-Function (which has its own BoundaryConditionCombo already), Area
+        // Sizing (not wired through that tab's own sizing calls yet), or TRT (a different fit
+        // entirely, always solved via UBWT machinery -- see geothermal/trt.py's own docstring).
+        SimSizeBoundaryConditionGroup.IsEnabled = !isGfunction && !isAreaSizing && !isTrt;
+        // Ground drift / multipole order / short-term capacitance: same gating as the g-function
+        // accuracy group -- only meaningful where this engine actually sizes/simulates.
+        AdvancedPhysicsGroup.IsEnabled = !isGfunction && !isAreaSizing && !isTrt;
     }
+
+    // "UBWT" (default, fast) or "MIFT" (true fluid temperature, slower) -- see
+    // geothermal.simulation.run_hourly_simulation's own gfunc_boundary_condition docstring.
+    private string GetGfuncBoundaryCondition() =>
+        SelectedText(SimSizeBoundaryConditionCombo).StartsWith("MIFT", StringComparison.OrdinalIgnoreCase) ? "MIFT" : "UBWT";
+
+    // The three control strategies geothermal/hybrid.py implements -- kept as one enum (rather
+    // than repeating .Contains("deadband")/.Contains("wet-bulb") checks at every call site) since
+    // both TowerStrategyCombo (shared panel) and Area_TowerStrategyCombo (Area Sizing's own picker)
+    // need the same 3-way classification in several places.
+    private enum TowerStrategy { PeakShaving, Deadband, WetBulbThreshold }
+
+    private static TowerStrategy GetTowerStrategy(ComboBox combo)
+    {
+        var text = SelectedText(combo);
+        if (text.Contains("deadband", StringComparison.OrdinalIgnoreCase)) return TowerStrategy.Deadband;
+        if (text.Contains("wet-bulb", StringComparison.OrdinalIgnoreCase)) return TowerStrategy.WetBulbThreshold;
+        return TowerStrategy.PeakShaving;
+    }
+
+    // A tower/dry cooler that never actually engages (0 hours, e.g. a wet-bulb threshold that
+    // never dips below the load's own cooling season) already has ZERO numeric effect --
+    // ground_load_W comes back identical to the untouched load either way. But leaving its
+    // "ran 0 h/yr, 0 kWh/yr, peak duty 0.0 kW" line in the results implies it's part of the
+    // design when it isn't, so every tower-reporting call site checks this first and reports
+    // the plain no-tower result instead, with a short note explaining why.
+    private static bool TowerHadNoEffect(JsonElement towerSummary) =>
+        towerSummary.GetProperty("tower_hours").GetInt32() == 0;
 
     private void TowerEnabledCheckBox_Changed(object sender, RoutedEventArgs e) => UpdateTowerControlsAvailability();
 
@@ -186,30 +288,150 @@ public partial class MainWindow : Window
     private void UpdateTowerControlsAvailability()
     {
         // TowerStrategyCombo's own XAML-set SelectedIndex="0" fires TowerStrategyCombo_SelectionChanged during
-        // InitializeComponent(), before TowerDeadbandPanel/TowerStrategyHintText (declared after it in the same
-        // GroupBox) exist -- guard on the LAST control this method touches, not the one whose own event fired.
+        // InitializeComponent(), before TowerDeadbandPanel/TowerWbtPanel/TowerStrategyHintText (declared after
+        // it in the same GroupBox) exist -- guard on the LAST control this method touches, not the one whose
+        // own event fired.
         if (TowerStrategyHintText == null) return;
         var enabled = TowerEnabledCheckBox.IsChecked == true;
+        // Monte Carlo sizing (Sizing tab) only wraps the plain size_field call -- flag the
+        // conflict here too, at the same place tower state is otherwise tracked, so it's visible
+        // as soon as the tower is turned on rather than only when Size Field is clicked.
+        Size_McTowerHintText.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         TowerCapacityBox.IsEnabled = enabled;
         TowerStrategyCombo.IsEnabled = enabled;
-        var isDeadband = enabled && SelectedText(TowerStrategyCombo).Contains("deadband", StringComparison.OrdinalIgnoreCase);
-        TowerDeadbandPanel.Visibility = isDeadband ? Visibility.Visible : Visibility.Collapsed;
-        TowerStrategyHintText.Text = isDeadband
-            ? "Ground-temperature deadband: the tower turns on once the borehole wall rises Deadband (C) above the undisturbed ground temperature, and stays on until it falls back to that temperature -- fewer tower run-hours than peak-shaving for a similar effect on long-term ground temperature. See geothermal/hybrid.py's deadband_tower_controller (Yu et al. 2026, https://doi.org/10.3390/buildings16183714)."
-            : "Peak-shaving: in every cooling hour the tower removes up to this much heat rejection from what the ground sees, never more than its own rating. Ignores wet-bulb performance -- see geothermal/hybrid.py.";
+        var strategy = enabled ? GetTowerStrategy(TowerStrategyCombo) : TowerStrategy.PeakShaving;
+        TowerDeadbandPanel.Visibility = strategy == TowerStrategy.Deadband ? Visibility.Visible : Visibility.Collapsed;
+        TowerWbtPanel.Visibility = strategy == TowerStrategy.WetBulbThreshold ? Visibility.Visible : Visibility.Collapsed;
+        TowerStrategyHintText.Text = strategy switch
+        {
+            TowerStrategy.Deadband =>
+                "Ground-temperature deadband: the tower turns on once the borehole wall rises Deadband (C) above the undisturbed ground temperature, and stays on until it falls back to that temperature -- fewer tower run-hours than peak-shaving for a similar effect on long-term ground temperature. See geothermal/hybrid.py's deadband_tower_controller (Yu et al. 2026, https://doi.org/10.3390/buildings16183714).",
+            TowerStrategy.WetBulbThreshold =>
+                "Wet-bulb threshold: the tower runs whenever a synthetic outdoor wet-bulb temperature (annual sine cycle between Min/Max outdoor WBT -- no real weather-file import yet) is below the threshold, regardless of ground temperature. Yu et al. 2026's outdoor-temperature-based control strategy -- see geothermal/hybrid.py's apply_wet_bulb_tower.",
+            _ =>
+                "Peak-shaving: in every cooling hour the tower removes up to this much heat rejection from what the ground sees, never more than its own rating. Ignores wet-bulb performance -- see geothermal/hybrid.py.",
+        };
+    }
+
+    private void CapacitanceEnabledCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        var enabled = CapacitanceEnabledCheckBox.IsChecked == true;
+        GroutRhoCpBox.IsEnabled = enabled;
+        PipeRhoCpBox.IsEnabled = enabled;
+    }
+
+    private void HeatPumpEnabledCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (HeatPumpCurvesPanel == null) return; // guard against the early-firing routed event during InitializeComponent()
+        HeatPumpCurvesPanel.IsEnabled = HeatPumpEnabledCheckBox.IsChecked == true;
+    }
+
+    // Computes C_b (J/m.K) from the shared panel's own pipe config/borehole radius/fluid,
+    // for the "short-term borehole thermal capacitance" toggle -- returns null when the
+    // checkbox is unchecked, so callers can pass it straight through as
+    // borehole_capacitance_J_mK without a separate branch.
+    private async Task<double?> BuildBoreholeCapacitanceJmKAsync(Dictionary<string, object?> pipeConfig, double boreholeRadius)
+    {
+        if (_engine is null || CapacitanceEnabledCheckBox.IsChecked != true)
+            return null;
+        var result = await _engine.CallAsync("borehole_thermal_capacitance", new Dictionary<string, object?>
+        {
+            ["config"] = pipeConfig, ["r_b"] = boreholeRadius,
+            ["rho_cp_grout_J_m3K"] = ParseDouble(GroutRhoCpBox, "Grout rho.cp"),
+            ["rho_cp_pipe_J_m3K"] = ParseDouble(PipeRhoCpBox, "Pipe rho.cp"),
+            ["fluid_str"] = SelectedText(FluidCombo),
+            ["fluid_percent"] = ParseDouble(FluidPercentBox, "Fluid percent"),
+            ["fluid_temperature_C"] = ParseDouble(FluidTemperatureBox, "Fluid temperature"),
+        });
+        return result.GetProperty("C_b_J_mK").GetDouble();
+    }
+
+    private async void GroundwaterCheckButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_engine is null)
+        {
+            GroundwaterResultText.Text = "Engine not available.";
+            return;
+        }
+        try
+        {
+            var result = await _engine.CallAsync("groundwater_steady_state_effect", new Dictionary<string, object?>
+            {
+                ["q_prime_W_m"] = ParseDouble(GroundwaterQPrimeBox, "Heat rate q'"),
+                ["r_b"] = ParseDouble(BoreholeRadiusBox, "Borehole radius"),
+                ["k_s"] = ParseDouble(ConductivityBox, "Ground conductivity"),
+                ["alpha"] = ParseDouble(AlphaBox, "Ground diffusivity"),
+                ["darcy_velocity_m_s"] = ParseDouble(DarcyVelocityBox, "Darcy velocity"),
+                ["rho_cp_water_J_m3K"] = ParseDouble(WaterRhoCpBox, "Water rho.cp"),
+                ["rho_cp_soil_J_m3K"] = ParseDouble(FormationRhoCpBox, "Saturated formation rho.cp"),
+            });
+            var peclet = result.GetProperty("peclet_number").GetDouble();
+            var dtDown = result.GetProperty("delta_T_downstream_C").GetDouble();
+            var dtUp = result.GetProperty("delta_T_upstream_C").GetDouble();
+            GroundwaterResultText.Text =
+                $"Peclet number: {peclet:F3}. Steady-state change at borehole wall -- downstream: {dtDown:+0.00;-0.00} C, upstream: {dtUp:+0.00;-0.00} C. " +
+                (peclet < 0.1
+                    ? "Pe << 1: groundwater flow has little effect at the borehole itself."
+                    : "Pe not negligible: the downstream/upstream asymmetry above may be design-relevant -- see geothermal/README.md's 'Groundwater/Darcy advection'.");
+        }
+        catch (EngineException ex)
+        {
+            GroundwaterResultText.Text = $"Error: {ex.Message}";
+        }
+    }
+
+    private async void ComputeLayeredGroundButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_engine is null)
+        {
+            LayeredGroundResultText.Text = "Engine not available.";
+            return;
+        }
+        try
+        {
+            var layers = _groundLayerRows.Select(r => new Dictionary<string, object?>
+            {
+                ["top_m"] = r.TopM, ["bottom_m"] = r.BottomM, ["k_s"] = r.KS, ["rho_cp_J_m3K"] = r.RhoCp,
+                ["T_g_C"] = r.TgC,
+            }).ToList();
+            var result = await _engine.CallAsync("weighted_average_ground_properties", new Dictionary<string, object?>
+            {
+                ["layers"] = layers,
+                ["D"] = ParseDouble(LayerDBox, "Buried depth D"),
+                ["H"] = ParseDouble(LayerHBox, "Borehole length H"),
+            });
+            var kEff = result.GetProperty("k_s_eff").GetDouble();
+            var alphaEff = result.GetProperty("alpha_eff_m2_s").GetDouble();
+            AlphaBox.Text = alphaEff.ToString("G6", CultureInfo.InvariantCulture);
+            ConductivityBox.Text = kEff.ToString("G6", CultureInfo.InvariantCulture);
+            var tgText = "";
+            if (result.TryGetProperty("T_g_eff_C", out var tgEffProp))
+            {
+                var tgEff = tgEffProp.GetDouble();
+                GroundTempBox.Text = tgEff.ToString("G6", CultureInfo.InvariantCulture);
+                tgText = $", T_g={tgEff:F2} C";
+            }
+            LayeredGroundResultText.Text =
+                $"Written to Ground properties above: k_s={kEff:F3} W/m.K, alpha={alphaEff:E3} m2/s{tgText}.";
+        }
+        catch (EngineException ex)
+        {
+            LayeredGroundResultText.Text = $"Error: {ex.Message}";
+        }
     }
 
     // Area Sizing's own dry-cooler strategy picker (separate from the shared TowerStrategyCombo
     // above, since the shared Hybrid cooling tower panel is disabled on this tab -- capacity here
     // is a solved-for OUTPUT, not something the user enters, so there is nothing to enable/disable,
-    // only the deadband panel's visibility to toggle).
+    // only which strategy panel is visible).
     private void Area_TowerStrategyCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        // Same early-firing gotcha as TowerStrategyCombo above: guard on the sibling declared
-        // after it (Area_TowerDeadbandPanel), not the combo whose own SelectedIndex="0" fired this.
-        if (Area_TowerDeadbandPanel == null) return;
-        var isDeadband = SelectedText(Area_TowerStrategyCombo).Contains("deadband", StringComparison.OrdinalIgnoreCase);
-        Area_TowerDeadbandPanel.Visibility = isDeadband ? Visibility.Visible : Visibility.Collapsed;
+        // Same early-firing gotcha as TowerStrategyCombo above: guard on the LAST-declared named
+        // sibling (Area_TowerWbtPanel), not the combo whose own SelectedIndex="0" fired this.
+        if (Area_TowerWbtPanel == null) return;
+        var strategy = GetTowerStrategy(Area_TowerStrategyCombo);
+        Area_TowerDeadbandPanel.Visibility = strategy == TowerStrategy.Deadband ? Visibility.Visible : Visibility.Collapsed;
+        Area_TowerWbtPanel.Visibility = strategy == TowerStrategy.WetBulbThreshold ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void Area_UseAmbientCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -267,6 +489,22 @@ public partial class MainWindow : Window
     // represent a "series"-wired double U-tube -- sizing_ghetool_client would raise
     // NotImplementedError. Disabling the checkbox up front avoids that surfacing as a
     // traceback the user has to hit before they learn it's not a supported combination.
+    private void Size_McEnabledCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        // No XAML-set IsChecked on this box, so this can't fire during InitializeComponent --
+        // consistent with TowerEnabledCheckBox's own (unguarded) Changed handler.
+        var enabled = Size_McEnabledCheckBox.IsChecked == true;
+        Size_McPanel.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        if (enabled)
+        {
+            // Read-only "mean" fields always mirror the left panel's current k_s/T_g -- there is
+            // deliberately no separate editable mean here, so the Monte Carlo run can never size
+            // around a different k_s/T_g than what the rest of the app is showing.
+            Size_McKsMeanText.Text = ConductivityBox.Text;
+            Size_McTgMeanText.Text = GroundTempBox.Text;
+        }
+    }
+
     private void PipeConfigCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (Size_CrossCheckCheckBox == null) return; // early-firing guard: PipeConfigCombo pre-selects index 0 in XAML
@@ -368,6 +606,20 @@ public partial class MainWindow : Window
 
     private static string SelectedText(ComboBox combo) =>
         ((ComboBoxItem)combo.SelectedItem).Content?.ToString() ?? string.Empty;
+
+    // Builds the synthetic annual wet-bulb-temperature series (no real weather-file import
+    // yet -- see geothermal/hybrid.py's synthetic_wet_bulb_series). minBox/maxBox let the two
+    // "Wet-bulb threshold" panels (shared panel, Area Sizing's own) each read their own inputs.
+    private static async Task<List<double>> BuildWetBulbSeriesAsync(EngineClient engine, int nHours, TextBox minBox, TextBox maxBox)
+    {
+        var result = await engine.CallAsync("synthetic_wet_bulb_series", new Dictionary<string, object?>
+        {
+            ["min_wet_bulb_C"] = ParseDouble(minBox, "Min outdoor WBT"),
+            ["max_wet_bulb_C"] = ParseDouble(maxBox, "Max outdoor WBT"),
+            ["n_hours"] = nHours,
+        });
+        return result.EnumerateArray().Select(x => x.GetDouble()).ToList();
+    }
 
     private Dictionary<string, object?> BuildPipeConfig()
     {
@@ -606,22 +858,70 @@ public partial class MainWindow : Window
             for (var y = 0; y < periodYears; y++)
                 repeatedLoad.AddRange(oneYearWithoutTower);
 
+            var boreholeCapacitanceJmK = await BuildBoreholeCapacitanceJmKAsync(pipeConfig, boreholeRadius);
             var commonSimArgs = new Dictionary<string, object?>
             {
                 ["field"] = field, ["alpha"] = alpha, ["k_s"] = conductivity, ["k_g"] = ParseDouble(GroutConductivityBox, "Grout conductivity"),
                 ["T_g"] = groundTemp, ["pipe_config"] = pipeConfig, ["m_flow_borehole"] = flowPerBorehole,
                 ["fluid_str"] = fluidStr, ["fluid_percent"] = fluidPercent, ["fluid_temperature_C"] = fluidTemp,
-                ["algorithm"] = algorithm,
+                ["algorithm"] = algorithm, ["gfunc_boundary_condition"] = GetGfuncBoundaryCondition(),
+                ["T_g_drift_C_per_year"] = ParseDouble(GroundDriftBox, "Ground temperature drift"),
+                ["multipole_order"] = ParseInt(MultipoleOrderBox, "Multipole order"),
+                ["borehole_capacitance_J_mK"] = boreholeCapacitanceJmK,
             };
 
             var towerEnabled = TowerEnabledCheckBox.IsChecked == true;
-            var towerIsDeadband = towerEnabled && SelectedText(TowerStrategyCombo).Contains("deadband", StringComparison.OrdinalIgnoreCase);
+            var heatPumpEnabled = HeatPumpEnabledCheckBox.IsChecked == true;
+            if (heatPumpEnabled && towerEnabled)
+            {
+                throw new InvalidOperationException(
+                    "Heat pump coupling and the hybrid cooling tower can't be combined yet -- " +
+                    "uncheck one of them. (No Python-side support exists for running both together.)");
+            }
+            var towerStrategy = towerEnabled ? GetTowerStrategy(TowerStrategyCombo) : TowerStrategy.PeakShaving;
             var towerCapacityKW = 0.0;
             JsonElement? towerSummary = null;
+            JsonElement? heatPumpSummary = null;
             List<double> oneYearWithTower = oneYearWithoutTower;
-            JsonElement result;
+            JsonElement result = default;
 
-            if (towerIsDeadband)
+            if (heatPumpEnabled)
+            {
+                // Iterative refinement (see geothermal/heat_pump.py's own docstring): the monthly load
+                // profile is read as the BUILDING load here, not the ground load directly. Start with
+                // EFT = T_g (a reasonable first guess before the field's own response is known), convert
+                // to ground load via the COP(EFT) curves, simulate, feed the simulated T_f_C back as the
+                // next pass's EFT, repeat -- 3 passes matches heat_pump.py's own documented/tested
+                // convergence behavior (test_heat_pump.py's
+                // test_iterative_refinement_with_run_hourly_simulation_converges uses the same count).
+                var heatingCurve = _heatPumpHeatingCurveRows.Select(r => new[] { r.EftC, r.Cop }).ToList();
+                var coolingCurve = _heatPumpCoolingCurveRows.Select(r => new[] { r.EftC, r.Cop }).ToList();
+                if (heatingCurve.Count < 2 || coolingCurve.Count < 2)
+                    throw new InvalidOperationException("Both heat pump COP curves need at least 2 rows.");
+
+                var eftGuess = Enumerable.Repeat(groundTemp, repeatedLoad.Count).ToList();
+                JsonElement hpResult = default;
+                for (var pass = 0; pass < 3; pass++)
+                {
+                    hpResult = await _engine.CallAsync("apply_heat_pump", new Dictionary<string, object?>
+                    {
+                        ["building_load_W"] = repeatedLoad, ["eft_C"] = eftGuess,
+                        ["cop_heating_curve"] = heatingCurve, ["cop_cooling_curve"] = coolingCurve,
+                    });
+                    var groundLoadHp = hpResult.GetProperty("ground_load_W").EnumerateArray().Select(x => x.GetDouble()).ToList();
+                    result = await _engine.CallAsync("run_hourly_simulation", new Dictionary<string, object?>(commonSimArgs)
+                    {
+                        ["hourly_load_W"] = groundLoadHp,
+                    });
+                    eftGuess = result.GetProperty("T_f_C").EnumerateArray().Select(x => x.GetDouble()).ToList();
+                    if (pass == 2)
+                    {
+                        heatPumpSummary = hpResult;
+                        oneYearWithTower = groundLoadHp.Take(HoursPerYear).ToList();
+                    }
+                }
+            }
+            else if (towerStrategy == TowerStrategy.Deadband)
             {
                 towerCapacityKW = ParseDouble(TowerCapacityBox, "Tower capacity");
                 var deadbandC = ParseDouble(TowerDeadbandBox, "Tower deadband");
@@ -634,8 +934,24 @@ public partial class MainWindow : Window
             }
             else
             {
+                // Peak-shaving and wet-bulb threshold are both stateless per-hour array transforms (see
+                // hybrid.py's module docstring) -- precompute groundLoad once, on the full repeated
+                // series, then hand it to the same run_hourly_simulation call either way.
                 var groundLoad = repeatedLoad;
-                if (towerEnabled)
+                if (towerStrategy == TowerStrategy.WetBulbThreshold)
+                {
+                    towerCapacityKW = ParseDouble(TowerCapacityBox, "Tower capacity");
+                    var wetBulb = await BuildWetBulbSeriesAsync(_engine, repeatedLoad.Count, TowerWbtMinBox, TowerWbtMaxBox);
+                    var towerResult = await _engine.CallAsync("apply_wet_bulb_tower", new Dictionary<string, object?>
+                    {
+                        ["hourly_load_W"] = repeatedLoad, ["wet_bulb_C"] = wetBulb,
+                        ["threshold_C"] = ParseDouble(TowerWbtThresholdBox, "Wet-bulb threshold"), ["tower_capacity_kW"] = towerCapacityKW,
+                    });
+                    towerSummary = towerResult;
+                    groundLoad = towerResult.GetProperty("ground_load_W").EnumerateArray().Select(x => x.GetDouble()).ToList();
+                    oneYearWithTower = groundLoad.Take(HoursPerYear).ToList();
+                }
+                else if (towerEnabled)
                 {
                     towerCapacityKW = ParseDouble(TowerCapacityBox, "Tower capacity");
                     var towerResult = await _engine.CallAsync("apply_cooling_tower", new Dictionary<string, object?>
@@ -669,8 +985,11 @@ public partial class MainWindow : Window
                 });
             }
 
+            var towerHadNoEffect = towerSummary is JsonElement summaryCheck && TowerHadNoEffect(summaryCheck);
+            var showTowerComparison = towerEnabled && !towerHadNoEffect;
+
             Sim_TempChart.Model = Charts.TemperatureHistory(tF, tB, null, null, $"Fluid temperature over {periodYears} years");
-            Sim_LoadChart.Model = Charts.MonthlyLoad(oneYearWithTower, towerEnabled ? oneYearWithoutTower : null);
+            Sim_LoadChart.Model = Charts.MonthlyLoad(oneYearWithTower, showTowerComparison ? oneYearWithoutTower : null);
             Sim_PlanView.SetRectangle(n1, n2, spacing, spacing, boreholeRadius);
 
             Sim_SummaryText.Text =
@@ -678,7 +997,19 @@ public partial class MainWindow : Window
                 $"R_b* = {rbStar:N4} m.K/W. " +
                 $"Fluid temperature over {periodYears} years: {tF.Min():N1} C .. {tF.Max():N1} C.";
 
-            if (towerSummary is JsonElement tower)
+            var strategyLabel = towerStrategy switch
+            {
+                TowerStrategy.Deadband => $"ground-temp deadband, {ParseDouble(TowerDeadbandBox, "Tower deadband"):N1} C band",
+                TowerStrategy.WetBulbThreshold => $"wet-bulb threshold, {ParseDouble(TowerWbtThresholdBox, "Wet-bulb threshold"):N1} C",
+                _ => "peak-shaving",
+            };
+            if (towerHadNoEffect)
+            {
+                Sim_SummaryText.Text +=
+                    $"\nCooling tower ({towerCapacityKW:N0} kW rated, {strategyLabel}): never engaged over this period, " +
+                    "so it made no difference -- results above are the same as running with no tower at all.";
+            }
+            else if (towerSummary is JsonElement tower)
             {
                 // apply_cooling_tower/run_hourly_simulation_with_deadband_tower were both called on the
                 // FULL periodYears-long series above, so their hours/energy totals cover the whole period
@@ -688,10 +1019,20 @@ public partial class MainWindow : Window
                 var towerPeak = tower.GetProperty("tower_peak_kW").GetDouble();
                 var towerHoursPerYear = tower.GetProperty("tower_hours").GetInt32() / (double)periodYears;
                 var towerEnergyPerYear = tower.GetProperty("tower_energy_kWh").GetDouble() / periodYears;
-                var strategyLabel = towerIsDeadband ? $"ground-temp deadband, {ParseDouble(TowerDeadbandBox, "Tower deadband"):N1} C band" : "peak-shaving";
                 Sim_SummaryText.Text +=
                     $"\nCooling tower ({towerCapacityKW:N0} kW rated, {strategyLabel}): ran {towerHoursPerYear:N0} h/yr avg, " +
                     $"{towerEnergyPerYear:N0} kWh/yr avg rejected, peak duty {towerPeak:N1} kW.";
+            }
+            if (heatPumpSummary is JsonElement hp)
+            {
+                // The 3rd (final, converged) pass's own apply_heat_pump result, run against the FULL
+                // repeatedLoad series -- total_electrical_energy_kWh covers the whole period, so divide
+                // by periodYears for a per-year figure, same convention as the tower summary above.
+                var electricalEnergyPerYear = hp.GetProperty("total_electrical_energy_kWh").GetDouble() / periodYears;
+                var meanCop = hp.GetProperty("mean_cop").GetDouble();
+                Sim_SummaryText.Text +=
+                    $"\nHeat pump (converged after 3 refinement passes): mean COP {meanCop:N2}, " +
+                    $"{electricalEnergyPerYear:N0} kWh/yr avg compressor electrical energy.";
             }
 
             Sim_StatusText.Text = string.Empty;
@@ -725,7 +1066,7 @@ public partial class MainWindow : Window
         Size_StatusText.Foreground = Brushes.DarkRed;
         var crossCheck = Size_CrossCheckCheckBox.IsChecked == true;
         var towerEnabled = TowerEnabledCheckBox.IsChecked == true;
-        var towerIsDeadband = towerEnabled && SelectedText(TowerStrategyCombo).Contains("deadband", StringComparison.OrdinalIgnoreCase);
+        var towerStrategy = towerEnabled ? GetTowerStrategy(TowerStrategyCombo) : TowerStrategy.PeakShaving;
         Size_StatusText.Text = crossCheck || towerEnabled
             ? "Sizing (this can take longer -- tower and/or GHEtool comparison runs extra sizing passes)..."
             : "Sizing...";
@@ -772,6 +1113,7 @@ public partial class MainWindow : Window
                 ["peak_cooling_kW"] = peakCooling,
             });
             var oneYearLoad = hourlyResult.EnumerateArray().Select(x => x.GetDouble()).ToList();
+            var boreholeCapacitanceJmK = await BuildBoreholeCapacitanceJmKAsync(pipeConfig, boreholeRadius);
 
             Dictionary<string, object?> BuildSizeFieldArgs(List<double> load) => new()
             {
@@ -780,8 +1122,83 @@ public partial class MainWindow : Window
                 ["fluid_str"] = fluidStr, ["fluid_percent"] = fluidPercent, ["fluid_temperature_C"] = fluidTemp,
                 ["hourly_load_W"] = load, ["simulation_period_years"] = periodYears,
                 ["T_f_min_limit_C"] = minFluidTemp, ["T_f_max_limit_C"] = maxFluidTemp,
-                ["H_min"] = hMin, ["H_max"] = hMax,
+                ["H_min"] = hMin, ["H_max"] = hMax, ["gfunc_boundary_condition"] = GetGfuncBoundaryCondition(),
+                ["T_g_drift_C_per_year"] = ParseDouble(GroundDriftBox, "Ground temperature drift"),
+                ["multipole_order"] = ParseInt(MultipoleOrderBox, "Multipole order"),
+                ["borehole_capacitance_J_mK"] = boreholeCapacitanceJmK,
             };
+
+            if (Size_McEnabledCheckBox.IsChecked == true)
+            {
+                if (towerEnabled)
+                {
+                    Size_StatusText.Text = "Uncertainty (Monte Carlo) can't run with a cooling tower enabled -- disable one or the other.";
+                    return;
+                }
+
+                var uncertainInputs = new Dictionary<string, object?>();
+                if (Size_McKsCheckBox.IsChecked == true)
+                {
+                    uncertainInputs["k_s"] = new Dictionary<string, object?>
+                    {
+                        ["dist"] = "normal", ["mean"] = conductivity, ["stddev"] = ParseDouble(Size_McKsStdDevBox, "k_s std dev"),
+                    };
+                }
+                if (Size_McTgCheckBox.IsChecked == true)
+                {
+                    uncertainInputs["T_g"] = new Dictionary<string, object?>
+                    {
+                        ["dist"] = "normal", ["mean"] = groundTemp, ["stddev"] = ParseDouble(Size_McTgStdDevBox, "T_g std dev"),
+                    };
+                }
+                if (uncertainInputs.Count == 0)
+                {
+                    Size_StatusText.Text = "Check at least one of k_s / T_g to vary for Monte Carlo sizing.";
+                    return;
+                }
+
+                var nSamples = ParseInt(Size_McSamplesBox, "Number of samples");
+                Size_StatusText.Text = $"Running Monte Carlo ({nSamples} samples of Size Field -- this can take a while)...";
+
+                var mcResult = await _engine.CallAsync("size_field_monte_carlo", new Dictionary<string, object?>
+                {
+                    ["base_kwargs"] = BuildSizeFieldArgs(oneYearLoad),
+                    ["uncertain_inputs"] = uncertainInputs,
+                    ["n_samples"] = nSamples,
+                });
+
+                var nFailed = mcResult.GetProperty("n_failed").GetInt32();
+                var fractionFailed = mcResult.GetProperty("fraction_failed").GetDouble();
+                var hMean = mcResult.GetProperty("H_m_mean").GetDouble();
+                var hStdDev = mcResult.GetProperty("H_m_stddev").GetDouble();
+                var percentileLines = string.Join("\n", mcResult.GetProperty("percentiles").EnumerateArray()
+                    .Select(p => $"P{p.GetProperty("p").GetDouble():N0}: H = {p.GetProperty("H_m").GetDouble():N1} m"));
+                var hSamples = mcResult.GetProperty("H_m_samples").EnumerateArray().Select(x => x.GetDouble()).ToArray();
+
+                Size_McResultText.Text =
+                    $"{nSamples} samples, {n1 * n2} boreholes:\n{percentileLines}\n" +
+                    $"Mean H = {hMean:N1} m, std dev = {hStdDev:N2} m\n" +
+                    (nFailed > 0
+                        ? $"{nFailed} of {nSamples} samples ({fractionFailed:P0}) could not meet the limits even at " +
+                          $"H_max = {hMax:N0} m -- censored at H_max for the percentiles above. A high fraction here " +
+                          "means H_max itself likely needs raising, not just the reported depth."
+                        : "All samples met the fluid-temperature limits within the searched H range.");
+                Size_McHistChart.Model = Charts.Histogram(hSamples, "Sized depth H (m)");
+
+                Size_ResultText.Text = string.Empty;
+                Size_McResultPanel.Visibility = Visibility.Visible;
+                Size_DeterministicHost.Visibility = Visibility.Collapsed;
+                Size_LoadPlanHost.Visibility = Visibility.Collapsed;
+                Size_DepthHost.Visibility = Visibility.Collapsed;
+                Size_TowerCrossCheckHost.Visibility = Visibility.Collapsed;
+                Size_StatusText.Text = string.Empty;
+                return;
+            }
+
+            Size_McResultPanel.Visibility = Visibility.Collapsed;
+            Size_DeterministicHost.Visibility = Visibility.Visible;
+            Size_LoadPlanHost.Visibility = Visibility.Visible;
+            Size_TowerCrossCheckHost.Visibility = Visibility.Visible;
 
             // Baseline (no tower) sizing -- always the result compared against GHEtool below,
             // since GHEtool has no way to see the tower-adjusted load (it sizes from monthly
@@ -793,7 +1210,7 @@ public partial class MainWindow : Window
             JsonElement? towerLoadResult = null;
             var headlineLoad = oneYearLoad;
 
-            if (towerIsDeadband)
+            if (towerStrategy == TowerStrategy.Deadband)
             {
                 // The deadband controller's behavior depends on the simulated ground temperature at
                 // whatever depth is being tried, so it can't be precomputed like apply_cooling_tower's
@@ -807,6 +1224,24 @@ public partial class MainWindow : Window
                 });
                 towerLoadResult = headlineResult;
                 headlineLoad = headlineResult.GetProperty("ground_load_W").EnumerateArray().Take(HoursPerYear).Select(x => x.GetDouble()).ToList();
+            }
+            else if (towerStrategy == TowerStrategy.WetBulbThreshold)
+            {
+                // Stateless per-hour transform (see hybrid.py's module docstring), so -- like
+                // peak-shaving -- it can be precomputed once, on the one representative year, before
+                // size_field's own internal repetition/bisection.
+                towerCapacityKW = ParseDouble(TowerCapacityBox, "Tower capacity");
+                var wetBulb = await BuildWetBulbSeriesAsync(_engine, oneYearLoad.Count, TowerWbtMinBox, TowerWbtMaxBox);
+                towerLoadResult = await _engine.CallAsync("apply_wet_bulb_tower", new Dictionary<string, object?>
+                {
+                    ["hourly_load_W"] = oneYearLoad, ["wet_bulb_C"] = wetBulb,
+                    ["threshold_C"] = ParseDouble(TowerWbtThresholdBox, "Wet-bulb threshold"), ["tower_capacity_kW"] = towerCapacityKW,
+                });
+                var groundLoad = towerLoadResult.Value.GetProperty("ground_load_W").EnumerateArray().Select(x => x.GetDouble()).ToList();
+                headlineLoad = groundLoad;
+
+                Size_StatusText.Text = "Sizing with tower...";
+                headlineResult = await _engine.CallAsync("size_field", BuildSizeFieldArgs(groundLoad));
             }
             else if (towerEnabled)
             {
@@ -829,19 +1264,30 @@ public partial class MainWindow : Window
             var iterations = headlineResult.GetProperty("iterations").GetInt32();
             var nBoreholes = n1 * n2;
 
+            var towerHadNoEffect = towerLoadResult is JsonElement loadCheck && TowerHadNoEffect(loadCheck);
+            var showTowerComparison = towerEnabled && !towerHadNoEffect;
+
             // size_field returns the full hourly series of the design it settled on -- chart it as-is.
             Size_TempChart.Model = Charts.TemperatureHistory(
                 ReadDoubleArray(headlineResult, "T_f_C"), ReadDoubleArray(headlineResult, "T_b_C"),
                 minFluidTemp, maxFluidTemp, $"Fluid temperature at H = {sizedH:N1} m over {periodYears} years");
-            Size_LoadChart.Model = Charts.MonthlyLoad(headlineLoad, towerEnabled ? oneYearLoad : null);
+            Size_LoadChart.Model = Charts.MonthlyLoad(headlineLoad, showTowerComparison ? oneYearLoad : null);
             Size_PlanView.SetRectangle(n1, n2, spacing, spacing, boreholeRadius);
 
             var depthBars = new List<(string Label, double DepthM)>
             {
                 (towerEnabled ? "Engine, no tower" : "Engine", baselineResult.GetProperty("H_m").GetDouble()),
             };
-            if (towerEnabled)
-                depthBars.Add(($"Engine + {towerCapacityKW:N0} kW tower{(towerIsDeadband ? " (deadband)" : "")}", sizedH));
+            if (showTowerComparison)
+            {
+                var barSuffix = towerStrategy switch
+                {
+                    TowerStrategy.Deadband => " (deadband)",
+                    TowerStrategy.WetBulbThreshold => " (wet-bulb)",
+                    _ => "",
+                };
+                depthBars.Add(($"Engine + {towerCapacityKW:N0} kW tower{barSuffix}", sizedH));
+            }
 
             Size_ResultText.Text =
                 $"Sized depth: H = {sizedH:N1} m\n" +
@@ -850,24 +1296,37 @@ public partial class MainWindow : Window
                 $"Fluid temperature achieved: {tFMin:N1} C .. {tFMax:N1} C (limits: {minFluidTemp:N1} .. {maxFluidTemp:N1} C)\n" +
                 $"Bisection iterations: {iterations}";
 
-            if (towerEnabled && towerLoadResult is JsonElement towerLoad)
+            var sizeStrategyLabel = towerStrategy switch
+            {
+                TowerStrategy.Deadband => $", ground-temp deadband ({ParseDouble(TowerDeadbandBox, "Tower deadband"):N1} C band)",
+                TowerStrategy.WetBulbThreshold => $", wet-bulb threshold ({ParseDouble(TowerWbtThresholdBox, "Wet-bulb threshold"):N1} C)",
+                _ => "",
+            };
+            if (towerHadNoEffect)
+            {
+                Size_TowerText.Text =
+                    $"{towerCapacityKW:N0} kW tower{sizeStrategyLabel}: never engaged over this period, so it made no " +
+                    $"difference -- sized depth above (H = {sizedH:N1} m) is the same as sizing with no tower at all.";
+            }
+            else if (towerEnabled && towerLoadResult is JsonElement towerLoad)
             {
                 var baselineH = baselineResult.GetProperty("H_m").GetDouble();
                 var reductionPct = 100.0 * (baselineH - sizedH) / baselineH;
                 var towerPeak = towerLoad.GetProperty("tower_peak_kW").GetDouble();
-                // apply_cooling_tower ran on a single representative year, so its totals are already
-                // per-year; size_field_with_deadband_tower ran on the full periodYears-long repeated
-                // series internally, so its totals need dividing for the same "h/yr" framing.
-                var towerHoursPerYear = towerIsDeadband
+                // apply_cooling_tower/apply_wet_bulb_tower both ran on a single representative year, so
+                // their totals are already per-year; size_field_with_deadband_tower ran on the full
+                // periodYears-long repeated series internally, so its totals need dividing for the same
+                // "h/yr" framing.
+                var isDeadband = towerStrategy == TowerStrategy.Deadband;
+                var towerHoursPerYear = isDeadband
                     ? towerLoad.GetProperty("tower_hours").GetInt32() / (double)periodYears
                     : towerLoad.GetProperty("tower_hours").GetInt32();
-                var towerEnergyPerYear = towerIsDeadband
+                var towerEnergyPerYear = isDeadband
                     ? towerLoad.GetProperty("tower_energy_kWh").GetDouble() / periodYears
                     : towerLoad.GetProperty("tower_energy_kWh").GetDouble();
-                var strategyLabel = towerIsDeadband ? $", ground-temp deadband ({ParseDouble(TowerDeadbandBox, "Tower deadband"):N1} C band)" : "";
                 Size_TowerText.Text =
                     $"Without tower: H = {baselineH:N1} m\n" +
-                    $"With {towerCapacityKW:N0} kW tower{strategyLabel}: H = {sizedH:N1} m ({reductionPct:N0}% smaller)\n" +
+                    $"With {towerCapacityKW:N0} kW tower{sizeStrategyLabel}: H = {sizedH:N1} m ({reductionPct:N0}% smaller)\n" +
                     $"Tower duty: peak {towerPeak:N1} kW, runs {towerHoursPerYear:N0} h/yr avg, rejects {towerEnergyPerYear:N0} kWh/yr avg";
             }
             else
@@ -1032,7 +1491,7 @@ public partial class MainWindow : Window
 
             JsonElement sizingResult;
             var towerNeeded = false;
-            var areaTowerIsDeadband = false;
+            var areaTowerStrategy = TowerStrategy.PeakShaving;
             try
             {
                 sizingResult = await _engine.CallAsync("size_field", sizeArgs);
@@ -1040,8 +1499,13 @@ public partial class MainWindow : Window
             catch (EngineException ex) when (ex.Message.Contains("fails the fluid temperature limit"))
             {
                 towerNeeded = true;
-                areaTowerIsDeadband = SelectedText(Area_TowerStrategyCombo).Contains("deadband", StringComparison.OrdinalIgnoreCase);
-                var dryCoolerCommand = areaTowerIsDeadband ? "minimum_deadband_tower_capacity" : "minimum_tower_capacity";
+                areaTowerStrategy = GetTowerStrategy(Area_TowerStrategyCombo);
+                var dryCoolerCommand = areaTowerStrategy switch
+                {
+                    TowerStrategy.Deadband => "minimum_deadband_tower_capacity",
+                    TowerStrategy.WetBulbThreshold => "minimum_wet_bulb_tower_capacity",
+                    _ => "minimum_tower_capacity",
+                };
                 Area_StatusText.Text = "Field alone insufficient at max practical depth -- solving for minimum dry cooler capacity...";
                 var dryCoolerArgs = new Dictionary<string, object?>
                 {
@@ -1051,10 +1515,43 @@ public partial class MainWindow : Window
                     ["hourly_load_W"] = oneYearLoad, ["simulation_period_years"] = periodYears,
                     ["T_f_min_limit_C"] = minFluidTemp, ["T_f_max_limit_C"] = maxFluidTemp,
                 };
-                if (areaTowerIsDeadband)
+                if (areaTowerStrategy == TowerStrategy.Deadband)
+                {
                     dryCoolerArgs["tower_deadband_C"] = ParseDouble(Area_TowerDeadbandBox, "Dry cooler deadband");
+                }
+                else if (areaTowerStrategy == TowerStrategy.WetBulbThreshold)
+                {
+                    dryCoolerArgs["wet_bulb_C"] = await BuildWetBulbSeriesAsync(_engine, oneYearLoad.Count, Area_TowerWbtMinBox, Area_TowerWbtMaxBox);
+                    dryCoolerArgs["threshold_C"] = ParseDouble(Area_TowerWbtThresholdBox, "Dry cooler wet-bulb threshold");
+                }
 
-                sizingResult = await _engine.CallAsync(dryCoolerCommand, dryCoolerArgs);
+                try
+                {
+                    sizingResult = await _engine.CallAsync(dryCoolerCommand, dryCoolerArgs);
+                }
+                catch (EngineException innerEx) when (innerEx.Message.Contains("provides NO benefit"))
+                {
+                    // The dry cooler genuinely cannot help here, no matter its rated capacity -- this
+                    // control strategy never assists during the hour that sets the limit (see
+                    // hybrid.minimum_tower_capacity's own distinction between "zero benefit" and
+                    // "not enough capacity"). Report the field-alone shortfall plainly instead of a
+                    // traceback: there is nothing a tower of any size would change here, so nothing to
+                    // add to the calculation.
+                    var strategyName = areaTowerStrategy switch
+                    {
+                        TowerStrategy.Deadband => "ground-temperature deadband",
+                        TowerStrategy.WetBulbThreshold => "wet-bulb threshold",
+                        _ => "peak-shaving",
+                    };
+                    Area_ResultText.Text =
+                        $"Field alone cannot meet the peak loads within {hMax:N0} m (max practical depth), " +
+                        $"and a {strategyName} dry cooler cannot help at all here -- this control strategy " +
+                        "never assists during the hour that sets the limit, so no rated capacity would " +
+                        "change the result.\nTry a deeper max practical depth, a larger field, or a " +
+                        "different control strategy (e.g. peak-shaving, which assists every cooling hour).";
+                    Area_StatusText.Text = string.Empty;
+                    return;
+                }
             }
 
             var rbStar = sizingResult.GetProperty("R_b_star_mK_W").GetDouble();
@@ -1096,19 +1593,24 @@ public partial class MainWindow : Window
                 var towerCapacity = sizingResult.GetProperty("tower_capacity_kW").GetDouble();
                 var towerStats = sizingResult.GetProperty("tower");
                 var towerPeak = towerStats.GetProperty("tower_peak_kW").GetDouble();
-                // minimum_tower_capacity's (peak-shaving) tower stats were computed on a single
-                // representative year, already per-year; minimum_deadband_tower_capacity ran on the
-                // full periodYears-repeated series internally, so its totals need dividing -- same
-                // asymmetry as the Sizing tab (see SizeFieldButton_Click).
-                var towerHoursPerYear = areaTowerIsDeadband
+                // minimum_tower_capacity's (peak-shaving) and minimum_wet_bulb_tower_capacity's tower
+                // stats were both computed on a single representative year, already per-year;
+                // minimum_deadband_tower_capacity ran on the full periodYears-repeated series
+                // internally, so its totals need dividing -- same asymmetry as the Sizing tab (see
+                // SizeFieldButton_Click).
+                var areaIsDeadband = areaTowerStrategy == TowerStrategy.Deadband;
+                var towerHoursPerYear = areaIsDeadband
                     ? towerStats.GetProperty("tower_hours").GetInt32() / (double)periodYears
                     : towerStats.GetProperty("tower_hours").GetInt32();
-                var towerEnergyPerYear = areaTowerIsDeadband
+                var towerEnergyPerYear = areaIsDeadband
                     ? towerStats.GetProperty("tower_energy_kWh").GetDouble() / periodYears
                     : towerStats.GetProperty("tower_energy_kWh").GetDouble();
-                var areaStrategyLabel = areaTowerIsDeadband
-                    ? $", ground-temp deadband ({ParseDouble(Area_TowerDeadbandBox, "Dry cooler deadband"):N1} C band)"
-                    : "";
+                var areaStrategyLabel = areaTowerStrategy switch
+                {
+                    TowerStrategy.Deadband => $", ground-temp deadband ({ParseDouble(Area_TowerDeadbandBox, "Dry cooler deadband"):N1} C band)",
+                    TowerStrategy.WetBulbThreshold => $", wet-bulb threshold ({ParseDouble(Area_TowerWbtThresholdBox, "Dry cooler wet-bulb threshold"):N1} C)",
+                    _ => "",
+                };
 
                 Area_ResultText.Text =
                     $"Field alone cannot meet the peak loads within {hMax:N0} m (max practical depth).\n" +
@@ -1125,9 +1627,22 @@ public partial class MainWindow : Window
                 TowerEnabledCheckBox.IsChecked = true;
                 // Mirror the strategy that was actually used into the shared panel too, so it's
                 // consistent if the user switches to Simulation/Sizing afterward.
-                TowerStrategyCombo.SelectedIndex = areaTowerIsDeadband ? 1 : 0;
-                if (areaTowerIsDeadband)
+                TowerStrategyCombo.SelectedIndex = areaTowerStrategy switch
+                {
+                    TowerStrategy.Deadband => 1,
+                    TowerStrategy.WetBulbThreshold => 2,
+                    _ => 0,
+                };
+                if (areaTowerStrategy == TowerStrategy.Deadband)
+                {
                     TowerDeadbandBox.Text = Area_TowerDeadbandBox.Text;
+                }
+                else if (areaTowerStrategy == TowerStrategy.WetBulbThreshold)
+                {
+                    TowerWbtThresholdBox.Text = Area_TowerWbtThresholdBox.Text;
+                    TowerWbtMinBox.Text = Area_TowerWbtMinBox.Text;
+                    TowerWbtMaxBox.Text = Area_TowerWbtMaxBox.Text;
+                }
             }
 
             Area_StatusText.Text = string.Empty;
@@ -1145,6 +1660,85 @@ public partial class MainWindow : Window
         finally
         {
             AreaSizeButton.IsEnabled = true;
+        }
+    }
+
+    private async void TrtRunButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_engine is null)
+        {
+            Trt_StatusText.Text = "Engine not available -- see message above.";
+            return;
+        }
+
+        TrtRunButton.IsEnabled = false;
+        Trt_StatusText.Foreground = Brushes.DarkRed;
+        Trt_StatusText.Text = "Fitting...";
+        Trt_ResultText.Text = string.Empty;
+        Trt_Chart.Model = Charts.Empty("TRT result");
+
+        try
+        {
+            var depth = ParseDouble(DepthBox, "Borehole depth H");
+            var buriedDepth = ParseDouble(BuriedDepthBox, "Buried depth D");
+            var boreholeRadius = ParseDouble(BoreholeRadiusBox, "Borehole radius");
+            var groundTemp = ParseDouble(GroundTempBox, "Ground temperature");
+            var rhoCp = ParseDouble(Trt_RhoCpBox, "Ground volumetric heat capacity");
+            var ksGuess = ParseDouble(Trt_KsGuessBox, "k_s initial guess");
+            var rbGuess = ParseDouble(Trt_RbGuessBox, "R_b initial guess");
+            var tMinHours = ParseDouble(Trt_TMinHoursBox, "Exclude data before (hours)");
+
+            if (_trtRows.Count < 3)
+                throw new InvalidOperationException("Need at least 3 rows of TRT log data.");
+
+            var timeS = _trtRows.Select(r => r.Hour * 3600.0).ToList();
+            var tFMeasured = _trtRows.Select(r => r.TFMeasuredC).ToList();
+            var qW = _trtRows.Select(r => r.QKW * 1000.0).ToList();
+
+            var result = await _engine.CallAsync("estimate_ground_properties_from_trt", new Dictionary<string, object?>
+            {
+                ["H"] = depth, ["D"] = buriedDepth, ["r_b"] = boreholeRadius,
+                ["time_s"] = timeS, ["T_f_C"] = tFMeasured, ["Q_W"] = qW,
+                ["T_g"] = groundTemp, ["rho_cp_J_m3K"] = rhoCp,
+                ["k_s_guess"] = ksGuess, ["R_b_guess"] = rbGuess, ["t_min_s"] = tMinHours * 3600.0,
+            });
+
+            var ksFit = result.GetProperty("k_s_W_mK").GetDouble();
+            var ksStdErr = result.GetProperty("k_s_stderr_W_mK").GetDouble();
+            var rbFit = result.GetProperty("R_b_mK_W").GetDouble();
+            var rbStdErr = result.GetProperty("R_b_stderr_mK_W").GetDouble();
+            var alpha = result.GetProperty("alpha_m2_s").GetDouble();
+            var nUsed = result.GetProperty("n_points_used").GetInt32();
+            var nTotal = result.GetProperty("n_points_total").GetInt32();
+            var rmse = result.GetProperty("rmse_C").GetDouble();
+            var predicted = ReadDoubleArray(result, "T_f_predicted_C");
+
+            Trt_ResultText.Text =
+                $"k_s = {ksFit:N3} ± {ksStdErr:N3} W/m.K\n" +
+                $"R_b = {rbFit:N4} ± {rbStdErr:N4} m.K/W (fit jointly with k_s)\n" +
+                $"Implied alpha = {alpha:0.###e+0} m2/s\n" +
+                $"Used {nUsed} of {nTotal} logged points (after excluding the first {tMinHours:N0} h)\n" +
+                $"Fit RMSE = {rmse:N3} C\n\n" +
+                "Apply k_s to the left panel's Conductivity box, and R_b to your pipe/grout choice there, " +
+                "once you're confident in this result -- not done automatically.";
+
+            Trt_Chart.Model = Charts.TrtFit(timeS.Select(t => t / 3600.0).ToList(), tFMeasured, predicted, tMinHours);
+
+            Trt_StatusText.Text = string.Empty;
+        }
+        catch (EngineException ex)
+        {
+            Trt_StatusText.Text = ex.PythonTraceback is null
+                ? $"Engine error: {ex.Message}"
+                : $"Engine error: {ex.Message}\n\n{ex.PythonTraceback}";
+        }
+        catch (Exception ex)
+        {
+            Trt_StatusText.Text = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            TrtRunButton.IsEnabled = true;
         }
     }
 

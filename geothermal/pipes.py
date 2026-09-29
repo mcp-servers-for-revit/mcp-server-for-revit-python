@@ -18,8 +18,9 @@ pipe's thermal resistance depends on the borehole it sits in.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Optional
 
+import numpy as np
 import pygfunction as gt
 
 from geothermal.fluids import to_pygfunction_fluid
@@ -65,8 +66,18 @@ def _pipe_flow_resistance(r_in: float, m_flow_pipe: float, fluid: gt.media.Fluid
 def build_pipe(
     config: dict[str, Any], H: float, D: float, r_b: float, k_s: float, k_g: float,
     m_flow_borehole: float, fluid_str: str, fluid_percent: float, fluid_temperature_C: float,
+    multipole_order: int = 2,
 ) -> Any:
-    """Build a pygfunction pipe object (SingleUTube/MultipleUTube/IndependentMultipleUTube/Coaxial)."""
+    """Build a pygfunction pipe object (SingleUTube/MultipleUTube/IndependentMultipleUTube/Coaxial).
+
+    multipole_order (J in pygfunction's own naming): number of multipoles per pipe used to
+    solve the borehole's internal thermal resistance network (Claesson & Hellstrom 2011).
+    pygfunction's own default and documented guidance is J=2 ("J=1 or J=2 usually gives
+    sufficient accuracy... J=0 corresponds to the line source approximation") -- exposed here
+    (previously hardcoded to pygfunction's own default with no way to raise it) for the rare
+    case that default isn't accurate enough, e.g. unusually tight shank spacing relative to
+    pipe radius, where the multipole expansion converges more slowly.
+    """
     borehole = gt.boreholes.Borehole(H=H, D=D, r_b=r_b, x=0.0, y=0.0)
     fluid = to_pygfunction_fluid(fluid_str, fluid_percent, fluid_temperature_C)
     ptype = config["type"]
@@ -81,11 +92,12 @@ def build_pipe(
         _, R_f = _pipe_flow_resistance(r_in, m_flow_pipe, fluid)
         R_fp = R_f + R_p
         if ptype == "single_u_tube":
-            return gt.pipes.SingleUTube(pos, r_in, r_out, borehole, k_s, k_g, R_fp)
+            return gt.pipes.SingleUTube(pos, r_in, r_out, borehole, k_s, k_g, R_fp, J=multipole_order)
         if ptype == "multiple_u_tube":
             return gt.pipes.MultipleUTube(
-                pos, r_in, r_out, borehole, k_s, k_g, R_fp, n_pipes, config=config.get("config", "parallel"))
-        return gt.pipes.IndependentMultipleUTube(pos, r_in, r_out, borehole, k_s, k_g, R_fp, n_pipes)
+                pos, r_in, r_out, borehole, k_s, k_g, R_fp, n_pipes,
+                config=config.get("config", "parallel"), J=multipole_order)
+        return gt.pipes.IndependentMultipleUTube(pos, r_in, r_out, borehole, k_s, k_g, R_fp, n_pipes, J=multipole_order)
 
     if ptype == "coaxial":
         pos = (0.0, 0.0)
@@ -100,7 +112,13 @@ def build_pipe(
         R_f_out = 1.0 / (h_f_out * 2 * 3.141592653589793 * r_in_o)
         R_ff = R_f_in + R_p_inner
         R_fp = R_f_out + R_p_outer
-        return gt.pipes.Coaxial(pos, (r_in_i, r_in_o), (r_out_i, r_out_o), borehole, k_s, k_g, R_ff, R_fp)
+        # gt.pipes.Coaxial indexes r_out with .argmin()/.argmax() to tell the inner pipe
+        # from the outer one -- a plain tuple has no such method, so this must be an array
+        # (a real, previously-uncaught bug: no prior test in this repo ever exercised
+        # build_pipe/effective_resistance with a coaxial config to catch it).
+        return gt.pipes.Coaxial(
+            pos, np.array([r_in_i, r_in_o]), np.array([r_out_i, r_out_o]), borehole, k_s, k_g, R_ff, R_fp,
+            J=multipole_order)
 
     raise ValueError(f"unknown pipe type {ptype!r}, expected one of {PIPE_TYPES}")
 
@@ -165,14 +183,41 @@ def suggest_flow_rate_kg_s(
 def effective_resistance(
     config: dict[str, Any], H: float, D: float, r_b: float, k_s: float, k_g: float,
     m_flow_borehole: float, fluid_str: str, fluid_percent: float, fluid_temperature_C: float,
+    multipole_order: int = 2,
 ) -> dict[str, Any]:
-    """Effective borehole thermal resistance R_b* (m.K/W), for display/QA."""
+    """Effective borehole thermal resistance R_b* (m.K/W), for display/QA.
+
+    Also reports the internal ("direct-coupling") thermal resistances between pipe legs --
+    R_delta_mK_W, the full delta-circuit resistance matrix (Claesson & Hellstrom 2011,
+    via pygfunction's thermal_resistances()); Rd[i][i] is leg i's own fluid-to-borehole-wall
+    resistance, Rd[i][j] (i != j) is the direct short-circuiting resistance between legs i
+    and j -- lower means more short-circuiting between the legs, a real design/QA concern
+    R_b* alone doesn't show. R_a_mK_W is the single scalar most TRT/GSHP literature calls
+    "R_a" (or R_12): Rd[0][1], meaningful only for exactly 2 legs (single_u_tube). Both are
+    None for coaxial, whose internal resistance network is radial rather than a multipole
+    leg network -- thermal_resistances() does not apply to it the way it does U-tube types.
+    """
     fluid = to_pygfunction_fluid(fluid_str, fluid_percent, fluid_temperature_C)
-    pipe = build_pipe(config, H, D, r_b, k_s, k_g, m_flow_borehole, fluid_str, fluid_percent, fluid_temperature_C)
+    pipe = build_pipe(
+        config, H, D, r_b, k_s, k_g, m_flow_borehole, fluid_str, fluid_percent, fluid_temperature_C,
+        multipole_order=multipole_order,
+    )
     R_b_star = float(pipe.effective_borehole_thermal_resistance(m_flow_borehole, fluid.cp))
+
+    R_delta: Optional[list[list[float]]] = None
+    R_a: Optional[float] = None
+    if config["type"] != "coaxial":
+        _, Rd = gt.pipes.thermal_resistances(pipe.pos, pipe.r_out, r_b, k_s, k_g, pipe.R_fp, J=pipe.J)
+        R_delta = Rd.tolist()
+        if len(R_delta) == 2:
+            R_a = float(R_delta[0][1])
+
     return {
         "type": config["type"],
         "R_b_star_mK_W": R_b_star,
+        "multipole_order": multipole_order,
+        "R_delta_mK_W": R_delta,
+        "R_a_mK_W": R_a,
         "m_flow_borehole_kg_s": m_flow_borehole,
         "fluid_str": fluid_str,
         "fluid_percent": fluid_percent,

@@ -59,17 +59,40 @@ bisection varies, not depth) is called once per capacity trial for the same
 reason: a bigger candidate capacity keeps the ground cooler, which changes
 when the controller's own on/off hysteresis fires, so a fresh controller has
 to be built for every capacity tried, not reused.
+
+A third control strategy, synthetic_wet_bulb_series()/apply_wet_bulb_tower():
+the "outdoor-temperature-based control strategy" (WBT-GSHP) in Yu et al. 2026
+-- run the tower whenever the OUTDOOR wet-bulb temperature is below a
+threshold, since a lower wet-bulb air stream lets the tower reject heat more
+efficiently, regardless of what the ground itself is doing. Unlike the
+deadband strategy, this rule has no memory of the ground's own response --
+whether hour i's tower runs depends only on that hour's outdoor wet-bulb
+reading, which is fixed ahead of time, not on anything the simulation
+computes -- so (like apply_cooling_tower) it IS a plain, depth/capacity-
+independent one-shot array transform. No tower_control_factory wiring is
+needed anywhere for it: apply it once, then feed the result into
+size_field/run_hourly_simulation/minimum_tower_capacity exactly like
+apply_cooling_tower's own output, unmodified.
+
+There is no real weather-file import (TMY or otherwise) in this codebase yet,
+so synthetic_wet_bulb_series() stands in with a smooth annual sinusoid
+(coldest in January, hottest in July) -- the same "deliberately simple
+stand-in" precedent as sizing.synthesize_hourly_load and apply_cooling_tower
+itself. Good enough to compare this dispatch strategy against the others on
+a plausible seasonal cycle; a real TMY import would replace just this one
+function, nothing downstream of it.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Callable, Optional
 
 from geothermal import simulation, sizing
 
 
 def _tower_summary(tower_load_W: list[float]) -> dict[str, Any]:
-    """The run-hours/energy/peak stats both apply_cooling_tower and the deadband dispatch
-    report -- factored out so the two control strategies stay comparable on the same terms."""
+    """The run-hours/energy/peak stats every control strategy in this module reports --
+    factored out so all of them stay comparable on the same terms."""
     return {
         "tower_hours": sum(1 for x in tower_load_W if x > 0.0),
         "tower_energy_kWh": sum(tower_load_W) / 1000.0,
@@ -94,6 +117,76 @@ def apply_cooling_tower(hourly_load_W: list[float], tower_capacity_kW: float) ->
     tower_load_W: list[float] = []
     for q in hourly_load_W:
         if q < 0.0:
+            duty_W = min(capacity_W, -q)
+            ground_load_W.append(q + duty_W)
+            tower_load_W.append(duty_W)
+        else:
+            ground_load_W.append(q)
+            tower_load_W.append(0.0)
+
+    return {
+        "ground_load_W": ground_load_W,
+        "tower_load_W": tower_load_W,
+        "tower_capacity_kW": tower_capacity_kW,
+        **_tower_summary(tower_load_W),
+    }
+
+
+def synthetic_wet_bulb_series(
+    min_wet_bulb_C: float, max_wet_bulb_C: float, n_hours: int = 8760, coldest_day_of_year: float = 15.0,
+) -> list[float]:
+    """One representative year of hourly outdoor wet-bulb temperature, as a smooth
+    sinusoid -- coldest at coldest_day_of_year (default day 15, mid-January) and hottest
+    exactly half a year later (mid-July), the same seasonal convention
+    sizing.synthesize_peak_only_load uses (heating centred on January, cooling on July).
+
+    No day/night sub-cycle, no weather noise, no real site data -- see this module's
+    docstring for why that's an acceptable stand-in here and not elsewhere. n_hours is a
+    parameter (not hardcoded to 8760) only so a caller can request a partial-year or
+    multi-year series directly; for the usual one-representative-year case, leave it at
+    the 8760 default and repeat the returned list the way hourly_load_W is repeated
+    elsewhere in this package.
+    """
+    if n_hours <= 0:
+        raise ValueError("n_hours must be > 0")
+    if min_wet_bulb_C > max_wet_bulb_C:
+        raise ValueError("min_wet_bulb_C must be <= max_wet_bulb_C")
+
+    mean_C = (min_wet_bulb_C + max_wet_bulb_C) / 2.0
+    amplitude_C = (max_wet_bulb_C - min_wet_bulb_C) / 2.0
+    return [
+        mean_C - amplitude_C * math.cos(2.0 * math.pi * (hour / 24.0 - coldest_day_of_year) / 365.0)
+        for hour in range(n_hours)
+    ]
+
+
+def apply_wet_bulb_tower(
+    hourly_load_W: list[float], wet_bulb_C: list[float], threshold_C: float, tower_capacity_kW: float,
+) -> dict[str, Any]:
+    """Offset hourly ground cooling load with a tower dispatched by OUTDOOR wet-bulb
+    temperature: runs (up to tower_capacity_kW) in every cooling hour where
+    wet_bulb_C[i] < threshold_C, regardless of what the ground is doing -- Yu et al.
+    2026's "outdoor-temperature-based control strategy" (see this module's docstring).
+    Same per-hour duty formula and heating-hours-untouched convention as
+    apply_cooling_tower; the only difference is the extra wet-bulb gate on top of "is this
+    a cooling hour."
+
+    hourly_load_W and wet_bulb_C must be the same length -- one wet-bulb reading per load
+    hour, typically both a single representative year (see synthetic_wet_bulb_series).
+    """
+    if tower_capacity_kW < 0:
+        raise ValueError("tower_capacity_kW must be >= 0")
+    if len(hourly_load_W) != len(wet_bulb_C):
+        raise ValueError(
+            f"hourly_load_W ({len(hourly_load_W)} hours) and wet_bulb_C ({len(wet_bulb_C)} hours) "
+            "must be the same length -- one wet-bulb reading per load hour"
+        )
+
+    capacity_W = tower_capacity_kW * 1000.0
+    ground_load_W: list[float] = []
+    tower_load_W: list[float] = []
+    for q, wbt in zip(hourly_load_W, wet_bulb_C):
+        if q < 0.0 and wbt < threshold_C:
             duty_W = min(capacity_W, -q)
             ground_load_W.append(q + duty_W)
             tower_load_W.append(duty_W)
@@ -157,6 +250,8 @@ def run_hourly_simulation_with_deadband_tower(
     hourly_load_W: list[float], tower_capacity_kW: float,
     tower_deadband_C: float = 0.5, tower_setpoint_C: Optional[float] = None,
     dt_s: float = 3600.0, algorithm: str = "ClaessonJaved", gfunc_method: str = "equivalent",
+    gfunc_boundary_condition: str = "UBWT", T_g_drift_C_per_year: float = 0.0,
+    borehole_capacitance_J_mK: Optional[float] = None, multipole_order: int = 2,
 ) -> dict[str, Any]:
     """run_hourly_simulation with a ground-temperature deadband tower (see
     deadband_tower_controller) -- the flat, JSON-friendly entry point engine_cli/the WPF
@@ -165,6 +260,15 @@ def run_hourly_simulation_with_deadband_tower(
     tower_setpoint_C defaults to T_g (the undisturbed ground temperature), matching Yu et
     al. 2026's own T0 = initial ground temperature -- pass a different value to target
     something else (e.g. a value already known to keep the fluid temperature in range).
+    Deliberately NOT drifted even when T_g_drift_C_per_year != 0: the deadband setpoint
+    represents how far the ground has warmed from its ORIGINAL undisturbed state, so a
+    tower that increasingly engages as climate/UHI drift alone pushes T_b past that fixed
+    setpoint over the design life is the intended, physically sensible behavior, not a bug.
+
+    gfunc_boundary_condition: passed straight through to run_hourly_simulation -- see
+    that function's own docstring. "UBWT" (default) reproduces this function's original
+    behavior exactly. Same for T_g_drift_C_per_year (0.0 default), borehole_capacitance_J_mK
+    (None default), and multipole_order (2 default) -- no change in behavior at their defaults.
     """
     controller = deadband_tower_controller(
         T0_C=T_g if tower_setpoint_C is None else tower_setpoint_C,
@@ -173,7 +277,10 @@ def run_hourly_simulation_with_deadband_tower(
     result = simulation.run_hourly_simulation(
         field, alpha, k_s, k_g, T_g, pipe_config, m_flow_borehole,
         fluid_str, fluid_percent, fluid_temperature_C, hourly_load_W, dt_s=dt_s,
-        algorithm=algorithm, gfunc_method=gfunc_method, tower_control=controller,
+        algorithm=algorithm, gfunc_method=gfunc_method,
+        gfunc_boundary_condition=gfunc_boundary_condition, T_g_drift_C_per_year=T_g_drift_C_per_year,
+        borehole_capacitance_J_mK=borehole_capacitance_J_mK, multipole_order=multipole_order,
+        tower_control=controller,
     )
     # tower_control is always passed above, so "tower_load_W" is always present here --
     # add the same run-hours/energy/peak summary apply_cooling_tower reports, for parity.
@@ -189,6 +296,8 @@ def size_field_with_deadband_tower(
     T_f_min_limit_C: Optional[float] = None, T_f_max_limit_C: Optional[float] = None,
     H_min: float = 20.0, H_max: float = 400.0, tol_m: float = 0.5, max_iter: int = 30,
     algorithm: str = "ClaessonJaved", gfunc_method: str = "equivalent",
+    gfunc_boundary_condition: str = "UBWT", T_g_drift_C_per_year: float = 0.0,
+    borehole_capacitance_J_mK: Optional[float] = None, multipole_order: int = 2,
 ) -> dict[str, Any]:
     """sizing.size_field with a ground-temperature deadband tower (see
     deadband_tower_controller) active at every depth the bisection tries -- the flat,
@@ -200,7 +309,12 @@ def size_field_with_deadband_tower(
     nothing useful to precompute before calling this.
 
     tower_setpoint_C defaults to T_g, matching Yu et al. 2026's own T0 = initial ground
-    temperature -- see run_hourly_simulation_with_deadband_tower's docstring.
+    temperature -- see run_hourly_simulation_with_deadband_tower's docstring (also for why
+    it is not itself drifted).
+
+    gfunc_boundary_condition/T_g_drift_C_per_year/borehole_capacitance_J_mK/multipole_order:
+    passed straight through to size_field -- see that function's own docstring. Defaults
+    reproduce this function's original behavior exactly.
     """
     T0_C = T_g if tower_setpoint_C is None else tower_setpoint_C
     result = sizing.size_field(
@@ -208,7 +322,9 @@ def size_field_with_deadband_tower(
         fluid_str, fluid_percent, fluid_temperature_C, hourly_load_W, simulation_period_years,
         T_f_min_limit_C=T_f_min_limit_C, T_f_max_limit_C=T_f_max_limit_C,
         H_min=H_min, H_max=H_max, tol_m=tol_m, max_iter=max_iter,
-        algorithm=algorithm, gfunc_method=gfunc_method,
+        algorithm=algorithm, gfunc_method=gfunc_method, gfunc_boundary_condition=gfunc_boundary_condition,
+        T_g_drift_C_per_year=T_g_drift_C_per_year,
+        borehole_capacitance_J_mK=borehole_capacitance_J_mK, multipole_order=multipole_order,
         tower_control_factory=lambda: deadband_tower_controller(T0_C, tower_deadband_C, tower_capacity_kW),
     )
     return {**result, "tower_capacity_kW": tower_capacity_kW, **_tower_summary(result["tower_load_W"])}
@@ -222,7 +338,10 @@ def minimum_tower_capacity(
     T_f_min_limit_C: Optional[float] = None, T_f_max_limit_C: Optional[float] = None,
     capacity_max_kW: Optional[float] = None, tol_kW: float = 0.5, max_iter: int = 20,
     algorithm: str = "ClaessonJaved", gfunc_method: str = "equivalent",
+    gfunc_boundary_condition: str = "UBWT", T_g_drift_C_per_year: float = 0.0,
+    borehole_capacitance_J_mK: Optional[float] = None, multipole_order: int = 2,
     tower_control_factory: Optional[Callable[[float], simulation.TowerControl]] = None,
+    array_transform: Optional[Callable[[list[float], float], dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """At a FIXED borehole depth H, find the minimum tower capacity that
     keeps the fluid temperature within the given limits over the design
@@ -237,8 +356,19 @@ def minimum_tower_capacity(
     across trials, since a bigger candidate capacity keeps the ground cooler and changes
     when the controller fires. One argument here (vs. sizing.size_field's zero-arg
     version) because capacity is what THIS bisection varies, not depth -- the controller
-    needs to know which candidate capacity it's being built for. None (the default)
-    reproduces this function's original apply_cooling_tower-based behavior exactly.
+    needs to know which candidate capacity it's being built for.
+
+    array_transform (optional): a two-arg callable -- transform(hourly_load_W,
+    capacity_kW) -> the same dict apply_cooling_tower returns -- for a STATELESS
+    per-hour strategy that isn't apply_cooling_tower itself, e.g. apply_wet_bulb_tower
+    bound to a fixed wet-bulb series and threshold via a lambda (see
+    minimum_wet_bulb_tower_capacity). Unlike tower_control_factory, this one doesn't need
+    to run inside the hourly loop -- it's precomputed once per capacity trial, same as
+    apply_cooling_tower always was. Ignored if tower_control_factory is given (a stateful
+    strategy takes precedence, since array_transform couldn't express it anyway).
+
+    Passing neither hook (both None, the default) reproduces this function's original
+    apply_cooling_tower-based behavior exactly.
 
     The search direction bisects on the **max-temperature (cooling) margin
     only** -- more tower capacity always helps it (monotonically), which a
@@ -260,6 +390,11 @@ def minimum_tower_capacity(
     capacity_max_kW defaults to the single worst cooling hour in
     hourly_load_W -- a tower that size fully offsets the worst hour, a
     reasonable upper bound to start the search from.
+
+    gfunc_boundary_condition/T_g_drift_C_per_year/borehole_capacitance_J_mK/multipole_order:
+    passed straight through to every simulation.run_hourly_simulation trial this function
+    runs -- see that function's own docstring. Defaults reproduce this function's original
+    behavior exactly.
     """
     if T_f_min_limit_C is None and T_f_max_limit_C is None:
         raise ValueError("at least one of T_f_min_limit_C / T_f_max_limit_C must be given")
@@ -280,7 +415,10 @@ def minimum_tower_capacity(
             result = simulation.run_hourly_simulation(
                 field, alpha, k_s, k_g, T_g, pipe_config, m_flow_borehole,
                 fluid_str, fluid_percent, fluid_temperature_C, repeated_load,
-                algorithm=algorithm, gfunc_method=gfunc_method, tower_control=controller,
+                algorithm=algorithm, gfunc_method=gfunc_method,
+                gfunc_boundary_condition=gfunc_boundary_condition, T_g_drift_C_per_year=T_g_drift_C_per_year,
+                borehole_capacitance_J_mK=borehole_capacitance_J_mK, multipole_order=multipole_order,
+                tower_control=controller,
             )
             tower = {
                 "ground_load_W": result["ground_load_W"], "tower_load_W": result["tower_load_W"],
@@ -288,14 +426,16 @@ def minimum_tower_capacity(
             }
         else:
             # Depth-independent AND capacity-behaves-the-same-every-hour strategy
-            # (apply_cooling_tower): safe to precompute once per capacity, outside the
-            # hourly loop, same as always.
-            tower = apply_cooling_tower(hourly_load_W, capacity_kW)
+            # (apply_cooling_tower, or array_transform standing in for it): safe to
+            # precompute once per capacity, outside the hourly loop, same as always.
+            tower = (array_transform or apply_cooling_tower)(hourly_load_W, capacity_kW)
             repeated_load = tower["ground_load_W"] * simulation_period_years
             result = simulation.run_hourly_simulation(
                 field, alpha, k_s, k_g, T_g, pipe_config, m_flow_borehole,
                 fluid_str, fluid_percent, fluid_temperature_C, repeated_load,
                 algorithm=algorithm, gfunc_method=gfunc_method,
+                gfunc_boundary_condition=gfunc_boundary_condition, T_g_drift_C_per_year=T_g_drift_C_per_year,
+                borehole_capacitance_J_mK=borehole_capacitance_J_mK, multipole_order=multipole_order,
             )
         cooling_margin = (T_f_max_limit_C - result["T_f_max_C"]) if T_f_max_limit_C is not None else float("inf")
         return result, cooling_margin, tower
@@ -305,16 +445,30 @@ def minimum_tower_capacity(
         ok_high = T_f_max_limit_C is None or result["T_f_max_C"] <= T_f_max_limit_C
         return ok_low and ok_high
 
+    result_lo, cooling_margin_lo, tower_lo = _run(0.0)
+    if cooling_margin_lo >= 0:
+        return {"tower_capacity_kW": 0.0, **result_lo, "tower": tower_lo, "iterations": 0}
+
     result_hi, cooling_margin_hi, tower_hi = _run(capacity_max_kW)
     if cooling_margin_hi < 0:
+        if result_hi["T_f_max_C"] >= result_lo["T_f_max_C"] - 1e-9:
+            # The largest tower tried made NO difference at all to the worst hour -- e.g. a
+            # wet-bulb-gated strategy whose threshold never covers the load's own peak season,
+            # so it never actually engages during the hour that sets the limit. Distinct from
+            # "not enough capacity": raising capacity_max_kW and retrying (the advice below)
+            # would not help here, no matter how large -- only a bigger field would.
+            raise ValueError(
+                f"a tower/dry cooler provides NO benefit at H={H} m for this load, even at "
+                f"{capacity_max_kW:.1f} kW (T_f_max still {result_hi['T_f_max_C']:.1f} C, "
+                f"identical to running with no tower at all) -- this control strategy never "
+                f"assists during the hour that sets the limit, so no capacity can fix this; "
+                f"the field itself needs more depth or boreholes instead"
+            )
         raise ValueError(
             f"even a {capacity_max_kW:.1f} kW tower doesn't bring the max fluid temperature "
             f"under the limit at H={H} m (still {result_hi['T_f_max_C']:.1f} C); "
             f"raise H or capacity_max_kW and retry"
         )
-    result_lo, cooling_margin_lo, tower_lo = _run(0.0)
-    if cooling_margin_lo >= 0:
-        return {"tower_capacity_kW": 0.0, **result_lo, "tower": tower_lo, "iterations": 0}
 
     lo, hi = 0.0, capacity_max_kW
     result_hi_iter, tower_hi_iter = result_hi, tower_hi
@@ -351,13 +505,20 @@ def minimum_deadband_tower_capacity(
     T_f_min_limit_C: Optional[float] = None, T_f_max_limit_C: Optional[float] = None,
     capacity_max_kW: Optional[float] = None, tol_kW: float = 0.5, max_iter: int = 20,
     algorithm: str = "ClaessonJaved", gfunc_method: str = "equivalent",
+    gfunc_boundary_condition: str = "UBWT", T_g_drift_C_per_year: float = 0.0,
+    borehole_capacitance_J_mK: Optional[float] = None, multipole_order: int = 2,
 ) -> dict[str, Any]:
     """minimum_tower_capacity with a ground-temperature deadband tower (see
     deadband_tower_controller) instead of peak-shaving -- the flat, JSON-friendly entry
     point engine_cli/the WPF UI call, mirroring size_field_with_deadband_tower's shape.
 
     tower_setpoint_C defaults to T_g, matching Yu et al. 2026's own T0 = initial ground
-    temperature -- see run_hourly_simulation_with_deadband_tower's docstring.
+    temperature -- see run_hourly_simulation_with_deadband_tower's docstring (also for why
+    it is not itself drifted).
+
+    gfunc_boundary_condition/T_g_drift_C_per_year/borehole_capacitance_J_mK/multipole_order:
+    passed straight through to minimum_tower_capacity -- defaults reproduce this function's
+    original behavior exactly.
     """
     T0_C = T_g if tower_setpoint_C is None else tower_setpoint_C
     return minimum_tower_capacity(
@@ -365,6 +526,46 @@ def minimum_deadband_tower_capacity(
         fluid_str, fluid_percent, fluid_temperature_C, hourly_load_W, simulation_period_years,
         T_f_min_limit_C=T_f_min_limit_C, T_f_max_limit_C=T_f_max_limit_C,
         capacity_max_kW=capacity_max_kW, tol_kW=tol_kW, max_iter=max_iter,
-        algorithm=algorithm, gfunc_method=gfunc_method,
+        algorithm=algorithm, gfunc_method=gfunc_method, gfunc_boundary_condition=gfunc_boundary_condition,
+        T_g_drift_C_per_year=T_g_drift_C_per_year,
+        borehole_capacitance_J_mK=borehole_capacitance_J_mK, multipole_order=multipole_order,
         tower_control_factory=lambda capacity_kW: deadband_tower_controller(T0_C, tower_deadband_C, capacity_kW),
+    )
+
+
+def minimum_wet_bulb_tower_capacity(
+    field_template: dict[str, Any], H: float, alpha: float, k_s: float, k_g: float, T_g: float,
+    pipe_config: dict[str, Any], m_flow_borehole: float,
+    fluid_str: str, fluid_percent: float, fluid_temperature_C: float,
+    hourly_load_W: list[float], simulation_period_years: int,
+    wet_bulb_C: list[float], threshold_C: float,
+    T_f_min_limit_C: Optional[float] = None, T_f_max_limit_C: Optional[float] = None,
+    capacity_max_kW: Optional[float] = None, tol_kW: float = 0.5, max_iter: int = 20,
+    algorithm: str = "ClaessonJaved", gfunc_method: str = "equivalent",
+    gfunc_boundary_condition: str = "UBWT", T_g_drift_C_per_year: float = 0.0,
+    borehole_capacitance_J_mK: Optional[float] = None, multipole_order: int = 2,
+) -> dict[str, Any]:
+    """minimum_tower_capacity with a wet-bulb-threshold tower (see apply_wet_bulb_tower)
+    instead of peak-shaving -- the flat, JSON-friendly entry point engine_cli/the WPF UI
+    call, mirroring minimum_deadband_tower_capacity's shape. Unlike the deadband variant,
+    this uses minimum_tower_capacity's array_transform hook, not tower_control_factory --
+    the wet-bulb strategy has no ground-temperature state to carry between trials, so it
+    can be precomputed per capacity exactly like apply_cooling_tower always was.
+
+    wet_bulb_C must be the same length as hourly_load_W -- see synthetic_wet_bulb_series
+    to build one.
+
+    gfunc_boundary_condition/T_g_drift_C_per_year/borehole_capacitance_J_mK/multipole_order:
+    passed straight through to minimum_tower_capacity -- defaults reproduce this function's
+    original behavior exactly.
+    """
+    return minimum_tower_capacity(
+        field_template, H, alpha, k_s, k_g, T_g, pipe_config, m_flow_borehole,
+        fluid_str, fluid_percent, fluid_temperature_C, hourly_load_W, simulation_period_years,
+        T_f_min_limit_C=T_f_min_limit_C, T_f_max_limit_C=T_f_max_limit_C,
+        capacity_max_kW=capacity_max_kW, tol_kW=tol_kW, max_iter=max_iter,
+        algorithm=algorithm, gfunc_method=gfunc_method, gfunc_boundary_condition=gfunc_boundary_condition,
+        T_g_drift_C_per_year=T_g_drift_C_per_year,
+        borehole_capacitance_J_mK=borehole_capacitance_J_mK, multipole_order=multipole_order,
+        array_transform=lambda load, capacity_kW: apply_wet_bulb_tower(load, wet_bulb_C, threshold_C, capacity_kW),
     )

@@ -91,6 +91,90 @@ def test_tower_lets_a_smaller_field_satisfy_the_same_temperature_limit():
     assert with_tower["T_f_max_C"] <= without_tower["T_f_max_C"] + 0.5
 
 
+# ---- synthetic_wet_bulb_series / apply_wet_bulb_tower: stateless, array-transform strategy ----
+
+def test_synthetic_wet_bulb_series_is_coldest_in_january_and_hottest_in_july():
+    series = hybrid.synthetic_wet_bulb_series(min_wet_bulb_C=0.0, max_wet_bulb_C=28.0)
+
+    assert len(series) == 8760
+    assert min(series) == pytest.approx(0.0, abs=0.05)
+    assert max(series) == pytest.approx(28.0, abs=0.05)
+    jan_15_hour = 15 * 24
+    jul_16_hour = (15 + 182) * 24  # half a year (365/2) after day 15
+    assert series[jan_15_hour] == pytest.approx(0.0, abs=0.1)
+    assert series[jul_16_hour] == pytest.approx(28.0, abs=0.5)
+    # Smooth and monotonic between the two extremes -- no day/night sub-cycle or noise.
+    assert series[jan_15_hour] < series[jan_15_hour + 24 * 30] < series[jul_16_hour]
+
+
+def test_synthetic_wet_bulb_series_rejects_invalid_parameters():
+    with pytest.raises(ValueError):
+        hybrid.synthetic_wet_bulb_series(min_wet_bulb_C=10.0, max_wet_bulb_C=5.0)
+    with pytest.raises(ValueError):
+        hybrid.synthetic_wet_bulb_series(min_wet_bulb_C=0.0, max_wet_bulb_C=10.0, n_hours=0)
+
+
+def test_apply_wet_bulb_tower_rejects_mismatched_lengths_and_negative_capacity():
+    with pytest.raises(ValueError):
+        hybrid.apply_wet_bulb_tower([0.0, 0.0], [10.0], threshold_C=20.0, tower_capacity_kW=5.0)
+    with pytest.raises(ValueError):
+        hybrid.apply_wet_bulb_tower([0.0], [10.0], threshold_C=20.0, tower_capacity_kW=-1.0)
+
+
+def test_apply_wet_bulb_tower_only_runs_below_the_threshold():
+    # Two cooling hours, one below the wet-bulb threshold (tower helps) and one above it
+    # (tower sits idle even though the ground would benefit) -- the whole point of this
+    # strategy versus peak-shaving, which would run in both hours.
+    load = [-8000.0, -8000.0]
+    wet_bulb = [15.0, 25.0]
+    result = hybrid.apply_wet_bulb_tower(load, wet_bulb, threshold_C=20.0, tower_capacity_kW=5.0)
+
+    assert result["ground_load_W"] == [-3000.0, -8000.0]
+    assert result["tower_load_W"] == [5000.0, 0.0]
+    assert result["tower_hours"] == 1
+
+
+def test_apply_wet_bulb_tower_never_assists_heating_hours():
+    load = [3000.0]  # heating hour, wet-bulb far below threshold
+    result = hybrid.apply_wet_bulb_tower(load, [0.0], threshold_C=20.0, tower_capacity_kW=100.0)
+
+    assert result["ground_load_W"] == [3000.0]
+    assert result["tower_hours"] == 0
+
+
+def test_wet_bulb_tower_runs_fewer_hours_than_peak_shaving_on_the_same_load():
+    # Its whole selling point vs. apply_cooling_tower: it skips cooling hours where the
+    # tower wouldn't be efficient anyway (high outdoor wet-bulb), so it should never run
+    # in MORE hours than peak-shaving would on the identical load.
+    hourly = sizing.synthesize_hourly_load(
+        BASELOAD_HEATING_KWH, BASELOAD_COOLING_KWH, PEAK_HEATING_KW, PEAK_COOLING_KW)
+    wet_bulb = hybrid.synthetic_wet_bulb_series(min_wet_bulb_C=0.0, max_wet_bulb_C=28.0)
+
+    peak_shaving = hybrid.apply_cooling_tower(hourly, tower_capacity_kW=60.0)
+    wbt = hybrid.apply_wet_bulb_tower(hourly, wet_bulb, threshold_C=15.0, tower_capacity_kW=60.0)
+
+    assert wbt["tower_hours"] > 0  # sanity: the threshold isn't so strict it never fires
+    assert wbt["tower_hours"] <= peak_shaving["tower_hours"]
+
+
+def test_wet_bulb_tower_lets_a_smaller_field_satisfy_the_same_temperature_limit():
+    hourly = sizing.synthesize_hourly_load(
+        BASELOAD_HEATING_KWH, BASELOAD_COOLING_KWH, PEAK_HEATING_KW, PEAK_COOLING_KW)
+    wet_bulb = hybrid.synthetic_wet_bulb_series(min_wet_bulb_C=0.0, max_wet_bulb_C=28.0)
+
+    size_kwargs = dict(
+        field_template=FIELD, alpha=1.0e-6, simulation_period_years=10,
+        T_f_min_limit_C=-2.0, T_f_max_limit_C=40.0, H_min=20.0, H_max=400.0, tol_m=1.0,
+        **COMMON_KWARGS,
+    )
+
+    without_tower = sizing.size_field(hourly_load_W=hourly, **size_kwargs)
+    tower_result = hybrid.apply_wet_bulb_tower(hourly, wet_bulb, threshold_C=20.0, tower_capacity_kW=60.0)
+    with_tower = sizing.size_field(hourly_load_W=tower_result["ground_load_W"], **size_kwargs)
+
+    assert with_tower["H_m"] < without_tower["H_m"]
+
+
 # ---- deadband_tower_controller: pure state-machine tests, no thermal model needed ----
 
 def test_deadband_controller_rejects_invalid_parameters():
@@ -205,7 +289,88 @@ def test_minimum_deadband_tower_capacity_finds_a_working_capacity_at_a_capped_de
     assert result["tower_capacity_kW"] > 0, "H=30 m alone should not satisfy a 35 C limit on this cooling-heavy profile"
     assert result["T_f_max_C"] <= 35.0 + 1e-6
     assert result["T_f_min_C"] >= -2.0 - 1e-6
+
+
+# ---- minimum_wet_bulb_tower_capacity: the wet-bulb strategy wired into capacity sizing ----
+
+def test_minimum_tower_capacity_array_transform_hook_defaults_to_apply_cooling_tower():
+    # Regression guard: array_transform=None (the default) must reproduce
+    # minimum_tower_capacity's original apply_cooling_tower-based behavior exactly.
+    hourly = sizing.synthesize_hourly_load(
+        BASELOAD_HEATING_KWH, BASELOAD_COOLING_KWH, PEAK_HEATING_KW, PEAK_COOLING_KW)
+    kwargs = dict(
+        H=30.0, alpha=1.0e-6, hourly_load_W=hourly, simulation_period_years=3,
+        T_f_min_limit_C=-2.0, T_f_max_limit_C=35.0, capacity_max_kW=300.0, tol_kW=2.0,
+        **COMMON_KWARGS,
+    )
+    without_hook = hybrid.minimum_tower_capacity(FIELD, **kwargs)
+    with_explicit_none = hybrid.minimum_tower_capacity(FIELD, array_transform=None, **kwargs)
+    assert without_hook["tower_capacity_kW"] == pytest.approx(with_explicit_none["tower_capacity_kW"])
+
+
+def test_minimum_wet_bulb_tower_capacity_finds_a_working_capacity_at_a_capped_depth():
+    # threshold_C is set comfortably above the whole synthetic wet-bulb range (0-28 C) so
+    # the tower is never gated off -- this is a mechanics/wiring test for the bisection and
+    # capped-depth fallback, not a test of the wet-bulb gate's own selectivity (covered by
+    # test_wet_bulb_tower_runs_fewer_hours_than_peak_shaving_on_the_same_load below). A
+    # LOW threshold here would gate the tower off during exactly this profile's July peak
+    # (which lands close to the synthetic series' own mid-July maximum), so even an
+    # unbounded capacity could never bring the single worst hour's temperature down --
+    # correctly reported as infeasible by minimum_tower_capacity's own error path, not a
+    # bug, but the wrong thing to assert against here.
+    hourly = sizing.synthesize_hourly_load(
+        BASELOAD_HEATING_KWH, BASELOAD_COOLING_KWH, PEAK_HEATING_KW, PEAK_COOLING_KW)
+    wet_bulb = hybrid.synthetic_wet_bulb_series(min_wet_bulb_C=0.0, max_wet_bulb_C=28.0)
+
+    result = hybrid.minimum_wet_bulb_tower_capacity(
+        FIELD, H=30.0, alpha=1.0e-6, hourly_load_W=hourly, simulation_period_years=3,
+        wet_bulb_C=wet_bulb, threshold_C=35.0, T_f_min_limit_C=-2.0, T_f_max_limit_C=35.0,
+        capacity_max_kW=300.0, tol_kW=2.0,
+        **COMMON_KWARGS,
+    )
+
+    assert result["tower_capacity_kW"] > 0, "H=30 m alone should not satisfy a 35 C limit on this cooling-heavy profile"
+    assert result["T_f_max_C"] <= 35.0 + 1e-6
+    assert result["T_f_min_C"] >= -2.0 - 1e-6
     assert result["tower"]["tower_hours"] > 0
+
+
+def test_wet_bulb_tower_capacity_sizing_is_infeasible_when_the_peak_hour_is_gated_off():
+    # The finding the test above works around, pinned down explicitly: if the load's own
+    # peak lands when the (synthetic) outdoor wet-bulb is also near its annual high, a
+    # wet-bulb-gated tower provides no help at exactly the hour that sets the limit, no
+    # matter how large -- minimum_tower_capacity must report this honestly rather than
+    # silently returning a capacity that doesn't actually work.
+    hourly = sizing.synthesize_hourly_load(
+        BASELOAD_HEATING_KWH, BASELOAD_COOLING_KWH, PEAK_HEATING_KW, PEAK_COOLING_KW)
+    wet_bulb = hybrid.synthetic_wet_bulb_series(min_wet_bulb_C=0.0, max_wet_bulb_C=28.0)
+
+    with pytest.raises(ValueError, match="doesn't bring the max fluid temperature"):
+        hybrid.minimum_wet_bulb_tower_capacity(
+            FIELD, H=30.0, alpha=1.0e-6, hourly_load_W=hourly, simulation_period_years=3,
+            wet_bulb_C=wet_bulb, threshold_C=20.0, T_f_min_limit_C=-2.0, T_f_max_limit_C=35.0,
+            capacity_max_kW=300.0, tol_kW=2.0,
+            **COMMON_KWARGS,
+        )
+
+
+def test_minimum_tower_capacity_reports_zero_benefit_distinctly_from_insufficient_capacity():
+    # A stricter version of the test above: a load whose ENTIRE cooling season sits above the
+    # wet-bulb threshold (not just the single peak hour), so the tower never engages even
+    # once -- capacity_max_kW makes literally no difference vs. no tower at all. This must be
+    # reported differently from "not enough capacity" (the test above), since "raise
+    # capacity_max_kW and retry" -- the generic case's own advice -- would not help here no
+    # matter how large; only a bigger field would.
+    hourly = [-20000.0 if 2920 <= h < 6570 else 3000.0 for h in range(8760)]  # ~May-Sep block
+    wet_bulb = hybrid.synthetic_wet_bulb_series(min_wet_bulb_C=0.0, max_wet_bulb_C=28.0)
+
+    with pytest.raises(ValueError, match="provides NO benefit"):
+        hybrid.minimum_wet_bulb_tower_capacity(
+            FIELD, H=55.0, alpha=1.0e-6, hourly_load_W=hourly, simulation_period_years=3,
+            wet_bulb_C=wet_bulb, threshold_C=15.0, T_f_min_limit_C=-2.0, T_f_max_limit_C=35.0,
+            capacity_max_kW=300.0, tol_kW=2.0,
+            **COMMON_KWARGS,
+        )
 
 
 # ---- size_field_with_deadband_tower: the deadband strategy wired into depth sizing ----

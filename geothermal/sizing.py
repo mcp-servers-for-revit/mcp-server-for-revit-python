@@ -28,13 +28,35 @@ _DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 HOURS_IN_MONTH = [d * 24 for d in _DAYS_IN_MONTH]
 
 
-def build_field_at_depth(field_template: dict[str, Any], H: float) -> fields.FieldDict:
+def build_field_at_depth(
+    field_template: dict[str, Any], H: float, depth_scale: Optional[list[float]] = None,
+) -> fields.FieldDict:
+    """depth_scale (optional): one relative depth multiplier per borehole (same order
+    the chosen layout builder produces, e.g. row-major for rectangle_field), so a
+    bisection on a single scalar H can still produce a field with genuinely different
+    per-borehole depths -- e.g. boreholes forced shallower near a property line or an
+    existing utility, kept at a fixed proportion of whatever depth the rest of the field
+    needs. None (the default) reproduces this function's original uniform-depth
+    behavior exactly. The layout is still built uniformly first (to get correct x/y
+    positions, D, r_b from the chosen layout builder), then each borehole's H is
+    overridden to H * depth_scale[i] -- this works for any layout without needing
+    per-layout-specific geometry logic.
+    """
     layout = field_template["layout"]
     if layout not in FIELD_BUILDERS:
         raise ValueError(f"unknown layout {layout!r}, expected one of {tuple(FIELD_BUILDERS)}")
     kwargs = {k: v for k, v in field_template.items() if k != "layout"}
     kwargs["H"] = H
-    return FIELD_BUILDERS[layout](**kwargs)
+    field = FIELD_BUILDERS[layout](**kwargs)
+    if depth_scale is None:
+        return field
+
+    boreholes = field["boreholes"]
+    if len(depth_scale) != len(boreholes):
+        raise ValueError(f"depth_scale has {len(depth_scale)} entries for {len(boreholes)} boreholes")
+    if any(s <= 0 for s in depth_scale):
+        raise ValueError("depth_scale entries must all be > 0")
+    return {"boreholes": [{**bh, "H": H * scale} for bh, scale in zip(boreholes, depth_scale)]}
 
 
 def synthesize_hourly_load(
@@ -169,6 +191,11 @@ def size_field(
     T_f_min_limit_C: Optional[float] = None, T_f_max_limit_C: Optional[float] = None,
     H_min: float = 20.0, H_max: float = 400.0, tol_m: float = 0.5, max_iter: int = 30,
     algorithm: str = "ClaessonJaved", gfunc_method: str = "equivalent",
+    gfunc_boundary_condition: str = "UBWT", bore_connectivity: Optional[list[int]] = None,
+    T_g_drift_C_per_year: float = 0.0,
+    depth_scale: Optional[list[float]] = None,
+    borehole_capacitance_J_mK: Optional[float] = None,
+    multipole_order: int = 2,
     tower_control_factory: Optional[Callable[[], simulation.TowerControl]] = None,
 ) -> dict[str, Any]:
     """tower_control_factory (optional): a zero-arg callable that mints a FRESH
@@ -180,6 +207,38 @@ def size_field(
     transform like hybrid.apply_cooling_tower has no such state, so it doesn't need
     this hook -- apply it to hourly_load_W once, before calling size_field, as
     before. None (the default) reproduces size_field's original behavior exactly.
+
+    gfunc_boundary_condition: passed straight through to every
+    simulation.run_hourly_simulation trial this function runs -- see that function's
+    own docstring. "UBWT" (default) reproduces size_field's original behavior
+    exactly; "MIFT" sizes against the true mixed-inlet-fluid-temperature response
+    instead of the UBWT+R_b* approximation, at a noticeably higher cost per trial
+    (rebuilding the pipe network once per depth tried, not once per whole call).
+
+    bore_connectivity: passed straight through to every simulation.run_hourly_simulation
+    trial -- see that function's own docstring. Only meaningful with
+    gfunc_boundary_condition="MIFT"; raises the same ValueError as that function if
+    given under "UBWT".
+
+    T_g_drift_C_per_year: passed straight through to every
+    simulation.run_hourly_simulation trial -- see that function's own docstring. 0.0
+    (default) reproduces size_field's original behavior exactly.
+
+    depth_scale: passed straight through to build_field_at_depth at every H this
+    function tries -- see that function's own docstring. None (default) reproduces
+    size_field's original uniform-depth behavior exactly; when given, this still
+    bisects on a single scalar H, but the field built at each trial has per-borehole
+    depth H * depth_scale[i], so the FINAL sized field can have genuinely different
+    borehole depths (e.g. boreholes forced shallower near a site constraint) while
+    keeping the same well-tested single-scalar bisection.
+
+    borehole_capacitance_J_mK: passed straight through to every
+    simulation.run_hourly_simulation trial -- see that function's own docstring. None
+    (default) reproduces size_field's original behavior exactly.
+
+    multipole_order: passed straight through to every simulation.run_hourly_simulation
+    trial -- see that function's own docstring. 2 (default) reproduces size_field's
+    original behavior exactly.
     """
     if T_f_min_limit_C is None and T_f_max_limit_C is None:
         raise ValueError("at least one of T_f_min_limit_C / T_f_max_limit_C must be given")
@@ -189,12 +248,17 @@ def size_field(
     repeated_load = list(hourly_load_W) * simulation_period_years
 
     def _run(H: float) -> tuple[dict[str, Any], float]:
-        field = build_field_at_depth(field_template, H)
+        field = build_field_at_depth(field_template, H, depth_scale=depth_scale)
         tower_control = tower_control_factory() if tower_control_factory is not None else None
         result = simulation.run_hourly_simulation(
             field, alpha, k_s, k_g, T_g, pipe_config, m_flow_borehole,
             fluid_str, fluid_percent, fluid_temperature_C, repeated_load,
-            algorithm=algorithm, gfunc_method=gfunc_method, tower_control=tower_control,
+            algorithm=algorithm, gfunc_method=gfunc_method,
+            gfunc_boundary_condition=gfunc_boundary_condition, bore_connectivity=bore_connectivity,
+            T_g_drift_C_per_year=T_g_drift_C_per_year,
+            borehole_capacitance_J_mK=borehole_capacitance_J_mK,
+            multipole_order=multipole_order,
+            tower_control=tower_control,
         )
         margin_low = (result["T_f_min_C"] - T_f_min_limit_C) if T_f_min_limit_C is not None else float("inf")
         margin_high = (T_f_max_limit_C - result["T_f_max_C"]) if T_f_max_limit_C is not None else float("inf")

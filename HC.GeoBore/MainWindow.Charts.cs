@@ -17,6 +17,7 @@ public partial class MainWindow
         ResetSimulationCharts();
         ResetSizingCharts();
         ResetAreaCharts();
+        ResetTrtChart();
     }
 
     private void ResetGfunctionCharts()
@@ -39,6 +40,11 @@ public partial class MainWindow
         Size_DepthChart.Model = null;
         Size_DepthHost.Visibility = System.Windows.Visibility.Collapsed;
         Size_PlanView.Clear();
+        Size_McHistChart.Model = Charts.Empty("Distribution of sized depth H");
+        Size_McResultPanel.Visibility = System.Windows.Visibility.Collapsed;
+        Size_DeterministicHost.Visibility = System.Windows.Visibility.Visible;
+        Size_LoadPlanHost.Visibility = System.Windows.Visibility.Visible;
+        Size_TowerCrossCheckHost.Visibility = System.Windows.Visibility.Visible;
     }
 
     private void ResetAreaCharts()
@@ -48,6 +54,11 @@ public partial class MainWindow
         Area_PlanView.Clear();
         Area_FootprintBar.Value = 0;
         Area_FootprintText.Text = string.Empty;
+    }
+
+    private void ResetTrtChart()
+    {
+        Trt_Chart.Model = Charts.Empty("TRT result");
     }
 
     private static double[] ReadDoubleArray(JsonElement parent, string property) =>

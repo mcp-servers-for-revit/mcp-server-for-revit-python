@@ -212,12 +212,72 @@ def _size_field_ghetool(args: dict[str, Any]) -> Any:
     return sizing_ghetool_client.size_field_isolated(**args)
 
 
+# ---- TRT parameter estimation ------------------------------------------
+
+@command("estimate_ground_properties_from_trt")
+def _estimate_ground_properties_from_trt(args: dict[str, Any]) -> Any:
+    from geothermal import trt
+    return trt.estimate_ground_properties_from_trt(**args)
+
+
+# ---- uncertainty (Monte Carlo sizing) -----------------------------------
+
+@command("size_field_monte_carlo")
+def _size_field_monte_carlo(args: dict[str, Any]) -> Any:
+    from geothermal import uncertainty
+    return uncertainty.size_field_monte_carlo(**args)
+
+
+# ---- layered ground -------------------------------------------------------
+
+@command("weighted_average_ground_properties")
+def _weighted_average_ground_properties(args: dict[str, Any]) -> Any:
+    from geothermal import ground
+    return ground.weighted_average_ground_properties(**args)
+
+
+# ---- short-term borehole thermal capacitance -------------------------------
+
+@command("borehole_thermal_capacitance")
+def _borehole_thermal_capacitance(args: dict[str, Any]) -> Any:
+    from geothermal import thermal_mass
+    return thermal_mass.borehole_thermal_capacitance(**args)
+
+
+# ---- groundwater / Darcy advection (screening check) -----------------------
+
+@command("groundwater_steady_state_effect")
+def _groundwater_steady_state_effect(args: dict[str, Any]) -> Any:
+    from geothermal import groundwater
+    return groundwater.groundwater_steady_state_effect(**args)
+
+
+# ---- heat pump coupling ---------------------------------------------------
+
+@command("apply_heat_pump")
+def _apply_heat_pump(args: dict[str, Any]) -> Any:
+    from geothermal import heat_pump
+    return heat_pump.apply_heat_pump(**args)
+
+
 # ---- hybrid (supplemental cooling tower) ------------------------------
 
 @command("apply_cooling_tower")
 def _apply_cooling_tower(args: dict[str, Any]) -> Any:
     from geothermal import hybrid
     return hybrid.apply_cooling_tower(**args)
+
+
+@command("synthetic_wet_bulb_series")
+def _synthetic_wet_bulb_series(args: dict[str, Any]) -> Any:
+    from geothermal import hybrid
+    return hybrid.synthetic_wet_bulb_series(**args)
+
+
+@command("apply_wet_bulb_tower")
+def _apply_wet_bulb_tower(args: dict[str, Any]) -> Any:
+    from geothermal import hybrid
+    return hybrid.apply_wet_bulb_tower(**args)
 
 
 @command("run_hourly_simulation_with_deadband_tower")
@@ -242,6 +302,12 @@ def _minimum_tower_capacity(args: dict[str, Any]) -> Any:
 def _minimum_deadband_tower_capacity(args: dict[str, Any]) -> Any:
     from geothermal import hybrid
     return hybrid.minimum_deadband_tower_capacity(**args)
+
+
+@command("minimum_wet_bulb_tower_capacity")
+def _minimum_wet_bulb_tower_capacity(args: dict[str, Any]) -> Any:
+    from geothermal import hybrid
+    return hybrid.minimum_wet_bulb_tower_capacity(**args)
 
 
 def main() -> None:

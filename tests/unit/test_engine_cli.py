@@ -24,9 +24,11 @@ def test_list_commands_includes_every_module():
                       "run_hourly_simulation", "size_field", "size_field_ghetool",
                       "network_gfunction", "field_summary", "list_pipes", "list_pipe_manufacturers",
                       "list_grouts", "list_grout_manufacturers",
-                      "apply_cooling_tower", "run_hourly_simulation_with_deadband_tower",
+                      "apply_cooling_tower", "synthetic_wet_bulb_series", "apply_wet_bulb_tower",
+                      "run_hourly_simulation_with_deadband_tower",
                       "size_field_with_deadband_tower",
-                      "minimum_tower_capacity", "minimum_deadband_tower_capacity", "field_layout_from_area",
+                      "minimum_tower_capacity", "minimum_deadband_tower_capacity",
+                      "minimum_wet_bulb_tower_capacity", "field_layout_from_area",
                       "synthesize_peak_only_load", "suggest_flow_rate"):
         assert expected in names
 

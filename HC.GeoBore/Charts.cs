@@ -311,4 +311,74 @@ public static class Charts
         model.Series.Add(series);
         return model;
     }
+
+    /// <summary>Monte Carlo sample distribution -- vertical bars over equal-width bins of values.</summary>
+    public static PlotModel Histogram(IReadOnlyList<double> values, string xAxisTitle, int bins = 15)
+    {
+        var model = NewModel($"Distribution of {xAxisTitle}", $"{values.Count} Monte Carlo samples");
+        var min = values.Min();
+        var max = values.Max();
+        if (max - min < 1e-9) max = min + 1.0; // degenerate (all-identical) case: avoid a zero-width axis
+        var binWidth = (max - min) / bins;
+
+        var counts = new int[bins];
+        foreach (var v in values)
+        {
+            var idx = (int)((v - min) / binWidth);
+            if (idx >= bins) idx = bins - 1;
+            if (idx < 0) idx = 0;
+            counts[idx]++;
+        }
+
+        model.Axes.Add(ValueAxis(AxisPosition.Bottom, xAxisTitle, min, max));
+        model.Axes.Add(ValueAxis(AxisPosition.Left, "Count", 0, counts.Max() * 1.15));
+
+        var series = new RectangleBarSeries { FillColor = Blue, StrokeColor = OxyColors.White, StrokeThickness = 1 };
+        for (var i = 0; i < bins; i++)
+        {
+            var left = min + i * binWidth;
+            series.Items.Add(new RectangleBarItem(left, 0, left + binWidth, counts[i]));
+        }
+        model.Series.Add(series);
+        return model;
+    }
+
+    /// <summary>TRT fit quality: measured fluid temperature against the model's own prediction at
+    /// the fitted k_s/R_b, with a marker for where the excluded early-time window ends.</summary>
+    public static PlotModel TrtFit(IReadOnlyList<double> hours, IReadOnlyList<double> measuredC, IReadOnlyList<double> predictedC, double tMinHours)
+    {
+        var model = NewModel("TRT fit: measured vs. predicted fluid temperature");
+        model.Axes.Add(ValueAxis(AxisPosition.Bottom, "Time (hours)", 0, hours.Count == 0 ? 1 : hours[^1] * 1.02));
+        var yLo = Math.Min(measuredC.Min(), predictedC.Min());
+        var yHi = Math.Max(measuredC.Max(), predictedC.Max());
+        var pad = Math.Max(0.2, (yHi - yLo) * 0.1);
+        model.Axes.Add(ValueAxis(AxisPosition.Left, "Fluid temperature (°C)", yLo - pad, yHi + pad));
+
+        var measured = new LineSeries { Title = "Measured", Color = Blue, MarkerType = MarkerType.Circle, MarkerSize = 2.5, MarkerFill = Blue, StrokeThickness = 1 };
+        var predicted = new LineSeries { Title = "Predicted (fit)", Color = Orange, StrokeThickness = 2 };
+        for (var i = 0; i < hours.Count; i++)
+        {
+            measured.Points.Add(new DataPoint(hours[i], measuredC[i]));
+            predicted.Points.Add(new DataPoint(hours[i], predictedC[i]));
+        }
+        model.Series.Add(measured);
+        model.Series.Add(predicted);
+
+        if (tMinHours > 0)
+        {
+            model.Annotations.Add(new LineAnnotation
+            {
+                Type = LineAnnotationType.Vertical,
+                X = tMinHours,
+                Color = Grey,
+                LineStyle = LineStyle.Dash,
+                StrokeThickness = 1,
+                Text = "fit starts here",
+                TextColor = Grey,
+                FontSize = 9,
+            });
+        }
+        AddBottomLegend(model);
+        return model;
+    }
 }

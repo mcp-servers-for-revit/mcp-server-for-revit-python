@@ -96,6 +96,41 @@
                     </StackPanel>
                 </GroupBox>
 
+                <GroupBox Header="Layered ground (optional)" Margin="0,0,0,8">
+                    <StackPanel Margin="6">
+                        <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,4"
+                                   Text="Computes a thickness-weighted EFFECTIVE alpha/k_s/T_g over the borehole span below, then writes them into Ground properties above -- a one-shot helper, not a live-linked model. See geothermal/README.md's 'Layered ground'." />
+                        <DataGrid x:Name="GroundLayerGrid" AutoGenerateColumns="False" CanUserAddRows="True" Height="140">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Top (m)" Binding="{Binding TopM}" Width="*" />
+                                <DataGridTextColumn Header="Bottom (m)" Binding="{Binding BottomM}" Width="*" />
+                                <DataGridTextColumn Header="k_s (W/m.K)" Binding="{Binding KS}" Width="*" />
+                                <DataGridTextColumn Header="rho.cp (J/m3.K)" Binding="{Binding RhoCp}" Width="*" />
+                                <DataGridTextColumn Header="T_g (C, optional)" Binding="{Binding TgC}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                <Label Content="Buried depth D (m)" Padding="0" />
+                                <TextBox x:Name="LayerDBox" Text="2.0" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                <Label Content="Borehole length H (m)" Padding="0" />
+                                <TextBox x:Name="LayerHBox" Text="150.0" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,2,0,0"
+                                   Text="On Sizing/Area Sizing, H is solved for -- enter your best estimate (e.g. H_max) here; the averaging window only shifts the effective properties mildly for a reasonable estimate." />
+                        <Button x:Name="ComputeLayeredGroundButton" Content="Compute effective properties"
+                                Margin="0,6,0,0" Padding="6,2" Click="ComputeLayeredGroundButton_Click" />
+                        <TextBlock x:Name="LayeredGroundResultText" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="11" />
+                    </StackPanel>
+                </GroupBox>
+
                 <GroupBox Header="Pipe and fluid" Margin="0,0,0,8">
                     <StackPanel Margin="6">
                         <Label Content="Pipe manufacturer" Padding="0" />
@@ -219,13 +254,120 @@
                         <ComboBox x:Name="TowerStrategyCombo" SelectedIndex="0" IsEnabled="False" SelectionChanged="TowerStrategyCombo_SelectionChanged">
                             <ComboBoxItem Content="Peak-shaving (every cooling hour)" />
                             <ComboBoxItem Content="Ground-temperature deadband" />
+                            <ComboBoxItem Content="Wet-bulb threshold" />
                         </ComboBox>
                         <StackPanel x:Name="TowerDeadbandPanel" Visibility="Collapsed" Margin="0,6,0,0">
                             <Label Content="Deadband (C)" Padding="0" />
                             <TextBox x:Name="TowerDeadbandBox" Text="0.5" />
                         </StackPanel>
+                        <StackPanel x:Name="TowerWbtPanel" Visibility="Collapsed" Margin="0,6,0,0">
+                            <Label Content="Threshold (C)" Padding="0" />
+                            <TextBox x:Name="TowerWbtThresholdBox" Text="20.0" />
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                    <Label Content="Min outdoor WBT (C)" Padding="0" />
+                                    <TextBox x:Name="TowerWbtMinBox" Text="0.0" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                    <Label Content="Max outdoor WBT (C)" Padding="0" />
+                                    <TextBox x:Name="TowerWbtMaxBox" Text="28.0" />
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Text="Min/max outdoor wet-bulb temperature (WBT) feed a synthetic annual cycle (coldest mid-January, hottest mid-July) -- there's no real weather-file import yet, so replace these with your site's actual TMY extremes if you have them."
+                                       TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,0" />
+                        </StackPanel>
                         <TextBlock x:Name="TowerStrategyHintText" TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,0"
                                    Text="Peak-shaving: in every cooling hour the tower removes up to this much heat rejection from what the ground sees, never more than its own rating. Ignores wet-bulb performance -- see geothermal/hybrid.py." />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox x:Name="SimSizeBoundaryConditionGroup" Header="g-function accuracy" Margin="0,0,0,8">
+                    <StackPanel Margin="6">
+                        <TextBlock Text="(used by Simulation and Sizing only)"
+                                   FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,4" />
+                        <Label Content="Boundary condition" Padding="0" />
+                        <ComboBox x:Name="SimSizeBoundaryConditionCombo" SelectedIndex="0">
+                            <ComboBoxItem Content="UBWT + R_b* (fast approximation)" />
+                            <ComboBoxItem Content="MIFT (true fluid temperature, slower)" />
+                        </ComboBox>
+                        <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,0"
+                                   Text="UBWT + R_b*: the usual 'ASHRAE' approximation -- fast, accurate enough for most designs. MIFT solves the field's actual pipe network directly (Cimmino 2015/2019) -- more accurate for larger fields at a low per-borehole flow rate, at noticeably higher cost per run. See geothermal/README.md's 'True MIFT (UIFT) sizing option'." />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox x:Name="AdvancedPhysicsGroup" Header="Advanced physics (optional)" Margin="0,0,0,8">
+                    <StackPanel Margin="6">
+                        <TextBlock Text="(used by Simulation and Sizing only)"
+                                   FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,4" />
+                        <Label Content="Ground temp. drift (C/year)" Padding="0" />
+                        <TextBox x:Name="GroundDriftBox" Text="0.0" />
+                        <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,2,0,0"
+                                   Text="Linear trend on the undisturbed ground temperature (climate/UHI warming), decoupled from the borehole's own response. 0.0 = no drift (original behavior)." />
+                        <Label Content="Multipole order J" Padding="0,6,0,0" />
+                        <TextBox x:Name="MultipoleOrderBox" Text="2" />
+                        <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,2,0,0"
+                                   Text="pygfunction's own internal-resistance multipole order (Claesson &amp; Hellstrom 2011). J=2 is pygfunction's own default and usually sufficient; raise it only if tight shank spacing makes you suspect slow convergence." />
+                        <Separator Margin="0,8,0,4" />
+                        <CheckBox x:Name="CapacitanceEnabledCheckBox" Content="Short-term borehole thermal capacitance"
+                                  Checked="CapacitanceEnabledCheckBox_Changed" Unchecked="CapacitanceEnabledCheckBox_Changed" />
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                <Label Content="Grout rho.cp (J/m3.K)" Padding="0" />
+                                <TextBox x:Name="GroutRhoCpBox" Text="3.8e6" IsEnabled="False" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                <Label Content="Pipe rho.cp (J/m3.K)" Padding="0" />
+                                <TextBox x:Name="PipeRhoCpBox" Text="1.5e6" IsEnabled="False" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,0"
+                                   Text="Models the grout/pipe/fluid inside the borehole as a lumped thermal mass, so the fluid temperature lags the usual instant R_b* offset after a load step (time constant tau_b = R_b* x C_b). Usually negligible at the 1-hour timestep; matters most for sub-hourly duty swings. See geothermal/README.md's 'Short-term borehole thermal capacitance'." />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox x:Name="GroundwaterGroup" Header="Groundwater screening (optional, standalone)" Margin="0,0,0,8">
+                    <StackPanel Margin="6">
+                        <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,4"
+                                   Text="Independent steady-state screening check -- NOT fed into Simulation/Sizing results. Uses this panel's own r_b/k_s/alpha above." />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                <Label Content="Darcy velocity (m/s)" Padding="0" />
+                                <TextBox x:Name="DarcyVelocityBox" Text="1.0e-6" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                <Label Content="Heat rate q' (W/m)" Padding="0" />
+                                <TextBox x:Name="GroundwaterQPrimeBox" Text="25.0" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                <Label Content="Water rho.cp (J/m3.K)" Padding="0" />
+                                <TextBox x:Name="WaterRhoCpBox" Text="4.18e6" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                <Label Content="Sat. formation rho.cp (J/m3.K)" Padding="0" />
+                                <TextBox x:Name="FormationRhoCpBox" Text="2.3e6" />
+                            </StackPanel>
+                        </Grid>
+                        <Button x:Name="GroundwaterCheckButton" Content="Check groundwater effect"
+                                Margin="0,6,0,0" Padding="6,2" Click="GroundwaterCheckButton_Click" />
+                        <TextBlock x:Name="GroundwaterResultText" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="11" />
                     </StackPanel>
                 </GroupBox>
             </StackPanel>
@@ -321,6 +463,31 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Heat pump coupling (optional)" Margin="0,0,0,8">
+                            <StackPanel Margin="6">
+                                <CheckBox x:Name="HeatPumpEnabledCheckBox" Content="Couple through a heat pump (COP vs EFT)"
+                                          Checked="HeatPumpEnabledCheckBox_Changed" Unchecked="HeatPumpEnabledCheckBox_Changed" />
+                                <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,4"
+                                           Text="When checked, the monthly load profile (shared panel) is read as the BUILDING load, converted to ground load via these COP(EFT) curves -- iterative refinement (3 passes), see geothermal/README.md's 'Heat pump coupling'. Unchecked (default): the load profile is the ground load directly, as before." />
+                                <StackPanel x:Name="HeatPumpCurvesPanel" IsEnabled="False">
+                                    <Label Content="Heating COP curve (EFT C, COP)" Padding="0" />
+                                    <DataGrid x:Name="HeatPumpHeatingCurveGrid" AutoGenerateColumns="False" CanUserAddRows="True" Height="90">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="EFT (C)" Binding="{Binding EftC}" Width="*" />
+                                            <DataGridTextColumn Header="COP" Binding="{Binding Cop}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <Label Content="Cooling COP curve (EFT C, COP)" Padding="0,6,0,0" />
+                                    <DataGrid x:Name="HeatPumpCoolingCurveGrid" AutoGenerateColumns="False" CanUserAddRows="True" Height="90">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="EFT (C)" Binding="{Binding EftC}" Width="*" />
+                                            <DataGridTextColumn Header="COP" Binding="{Binding Cop}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+
                         <Button x:Name="SimulateButton" Content="Run Simulation"
                                 Height="36" Margin="0,4,0,4" Click="SimulateButton_Click" />
 
@@ -412,6 +579,52 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Uncertainty (Monte Carlo)" Margin="0,0,0,8">
+                            <StackPanel Margin="6">
+                                <CheckBox x:Name="Size_McEnabledCheckBox" Content="Run as Monte Carlo (report P50/P90 depth)"
+                                          Checked="Size_McEnabledCheckBox_Changed" Unchecked="Size_McEnabledCheckBox_Changed" />
+                                <StackPanel x:Name="Size_McPanel" Visibility="Collapsed" Margin="0,6,0,0">
+                                    <CheckBox x:Name="Size_McKsCheckBox" Content="Vary ground conductivity k_s (normal)" IsChecked="True" />
+                                    <Grid Margin="18,2,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                            <Label Content="Mean (from left panel)" Padding="0" FontSize="10" />
+                                            <TextBox x:Name="Size_McKsMeanText" IsReadOnly="True" Background="#EEEEEE" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                            <Label Content="Std dev (W/m.K)" Padding="0" FontSize="10" />
+                                            <TextBox x:Name="Size_McKsStdDevBox" Text="0.2" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <CheckBox x:Name="Size_McTgCheckBox" Content="Vary ground temperature T_g (normal)" Margin="0,8,0,0" />
+                                    <Grid Margin="18,2,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                            <Label Content="Mean (from left panel)" Padding="0" FontSize="10" />
+                                            <TextBox x:Name="Size_McTgMeanText" IsReadOnly="True" Background="#EEEEEE" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                            <Label Content="Std dev (C)" Padding="0" FontSize="10" />
+                                            <TextBox x:Name="Size_McTgStdDevBox" Text="0.5" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Label Content="Number of samples" Padding="0,8,0,0" />
+                                    <TextBox x:Name="Size_McSamplesBox" Text="200" />
+                                    <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,0"
+                                               Text="Resamples Size Field this many times, drawing a fresh k_s/T_g each trial, and reports the sized depth as P50/P90 instead of one number. Replaces the deterministic result below with the Monte Carlo one; the tower and GHEtool cross-check are not run in this mode. Costs roughly (samples x one normal Size Field run) -- 200 samples can take several minutes." />
+                                </StackPanel>
+                                <TextBlock x:Name="Size_McTowerHintText" TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,0"
+                                           Visibility="Collapsed"
+                                           Text="Not available with a cooling tower enabled above -- Monte Carlo sizing only wraps the plain (no-tower) Size Field call." />
+                            </StackPanel>
+                        </GroupBox>
+
                         <Button x:Name="SizeFieldButton" Content="Size Field"
                                 Height="36" Margin="0,4,0,4" Click="SizeFieldButton_Click" />
 
@@ -423,11 +636,19 @@
                             <TextBlock Text="Sizing result" FontWeight="Bold" FontSize="14" />
                             <TextBlock x:Name="Size_ResultText" TextWrapping="Wrap" Margin="0,4,0,10" FontSize="14" />
 
-                            <Border Style="{StaticResource ChartCard}" Height="340">
+                            <!-- Only shown after a Monte Carlo run; replaces the deterministic result/charts below. -->
+                            <StackPanel x:Name="Size_McResultPanel" Visibility="Collapsed">
+                                <TextBlock x:Name="Size_McResultText" TextWrapping="Wrap" Margin="0,0,0,10" FontSize="14" />
+                                <Border Style="{StaticResource ChartCard}" Height="260">
+                                    <oxy:PlotView x:Name="Size_McHistChart" IsMouseWheelEnabled="False" />
+                                </Border>
+                            </StackPanel>
+
+                            <Border x:Name="Size_DeterministicHost" Style="{StaticResource ChartCard}" Height="340">
                                 <oxy:PlotView x:Name="Size_TempChart" IsMouseWheelEnabled="False" />
                             </Border>
 
-                            <Grid Height="280">
+                            <Grid x:Name="Size_LoadPlanHost" Height="280">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="230" />
@@ -445,11 +666,13 @@
                                 <oxy:PlotView x:Name="Size_DepthChart" IsMouseWheelEnabled="False" />
                             </Border>
 
-                            <TextBlock Text="Hybrid cooling tower" FontWeight="Bold" FontSize="14" />
-                            <TextBlock x:Name="Size_TowerText" TextWrapping="Wrap" Margin="0,4,0,0" />
-                            <Separator Margin="0,12,0,12" />
-                            <TextBlock Text="GHEtool cross-check" FontWeight="Bold" FontSize="14" />
-                            <TextBlock x:Name="Size_CrossCheckText" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <StackPanel x:Name="Size_TowerCrossCheckHost">
+                                <TextBlock Text="Hybrid cooling tower" FontWeight="Bold" FontSize="14" />
+                                <TextBlock x:Name="Size_TowerText" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                <Separator Margin="0,12,0,12" />
+                                <TextBlock Text="GHEtool cross-check" FontWeight="Bold" FontSize="14" />
+                                <TextBlock x:Name="Size_CrossCheckText" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>
@@ -548,12 +771,31 @@
                                     <ComboBox x:Name="Area_TowerStrategyCombo" SelectedIndex="0" SelectionChanged="Area_TowerStrategyCombo_SelectionChanged">
                                         <ComboBoxItem Content="Peak-shaving (every cooling hour)" />
                                         <ComboBoxItem Content="Ground-temperature deadband" />
+                                        <ComboBoxItem Content="Wet-bulb threshold" />
                                     </ComboBox>
                                     <StackPanel x:Name="Area_TowerDeadbandPanel" Visibility="Collapsed" Margin="0,6,0,0">
                                         <Label Content="Deadband (C)" Padding="0" />
                                         <TextBox x:Name="Area_TowerDeadbandBox" Text="0.5" />
                                     </StackPanel>
-                                    <TextBlock Text="Only used if the field alone can't meet the fluid temperature limits at max practical depth -- same two strategies as the shared Hybrid cooling tower panel (Simulation/Sizing tabs), see geothermal/hybrid.py."
+                                    <StackPanel x:Name="Area_TowerWbtPanel" Visibility="Collapsed" Margin="0,6,0,0">
+                                        <Label Content="Threshold (C)" Padding="0" />
+                                        <TextBox x:Name="Area_TowerWbtThresholdBox" Text="20.0" />
+                                        <Grid Margin="0,6,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                                <Label Content="Min outdoor WBT (C)" Padding="0" />
+                                                <TextBox x:Name="Area_TowerWbtMinBox" Text="0.0" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                                <Label Content="Max outdoor WBT (C)" Padding="0" />
+                                                <TextBox x:Name="Area_TowerWbtMaxBox" Text="28.0" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                    <TextBlock Text="Only used if the field alone can't meet the fluid temperature limits at max practical depth -- same strategies as the shared Hybrid cooling tower panel (Simulation/Sizing tabs), see geothermal/hybrid.py."
                                                TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,4,0,0" />
                                 </StackPanel>
                             </GroupBox>
@@ -593,6 +835,69 @@
                             </Border>
                             <Border Style="{StaticResource ChartCard}" Height="270">
                                 <oxy:PlotView x:Name="Area_LoadChart" IsMouseWheelEnabled="False" />
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+            <!-- ============================== TAB 5: TRT ANALYSIS ============================== -->
+            <TabItem Header="TRT Analysis">
+                <Grid Margin="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="320" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
+                        <StackPanel>
+                            <GroupBox Header="TRT settings" Margin="0,0,0,8">
+                                <StackPanel Margin="6">
+                                    <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,4"
+                                               Text="Uses the shared Borehole depth H, Buried depth D, Borehole radius r_b and Ground temperature T_g (left panel) for the test borehole. Fits k_s and R_b jointly from the raw log data below -- it does not need the Pipe/fluid panel, since R_b is a fit output here, not computed from a known pipe." />
+                                    <Label Content="Ground volumetric heat capacity (J/m3.K)" Padding="0" />
+                                    <TextBox x:Name="Trt_RhoCpBox" Text="2.4e6" />
+                                    <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,2,0,0"
+                                               Text="Not fit from the test data -- a single TRT poorly constrains k_s and this together. Use a value known for your site's actual ground type; 2.0-2.6e6 is a typical saturated-rock/soil range, not a universal default." />
+                                    <Label Content="k_s initial guess (W/m.K)" Padding="0,6,0,0" />
+                                    <TextBox x:Name="Trt_KsGuessBox" Text="2.0" />
+                                    <Label Content="R_b initial guess (m.K/W)" Padding="0,6,0,0" />
+                                    <TextBox x:Name="Trt_RbGuessBox" Text="0.15" />
+                                    <Label Content="Exclude data before (hours)" Padding="0,6,0,0" />
+                                    <TextBox x:Name="Trt_TMinHoursBox" Text="12" />
+                                    <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,2,0,0"
+                                               Text="Early-time readings are excluded from the fit (not from the heat-injection history the physics uses -- see geothermal/trt.py). Pick from the standard Fourier-number rule of thumb (Fo = alpha*t/r_b^2 &gt; ~5) for your ground type; a wrong guess here silently biases the fit." />
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="TRT log data (hourly)" Margin="0,0,0,8">
+                                <StackPanel Margin="6">
+                                    <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,4"
+                                               Text="Example placeholder data below -- replace Q and T_f (measured) with your own logger readings. Rows must be evenly spaced hourly, starting 1 hour after the test began. Q: heat rate, +ve = extracted from ground (this engine's usual sign convention) -- a typical heat-injection TRT uses a NEGATIVE Q." />
+                                    <DataGrid x:Name="TrtGrid" AutoGenerateColumns="False" CanUserAddRows="False" Height="260">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Hour" Binding="{Binding Hour}" IsReadOnly="True" Width="50" />
+                                            <DataGridTextColumn Header="Q (kW)" Binding="{Binding QKW}" Width="*" />
+                                            <DataGridTextColumn Header="T_f measured (C)" Binding="{Binding TFMeasuredC}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <Button x:Name="TrtRunButton" Content="Estimate k_s / R_b"
+                                    Height="36" Margin="0,4,0,4" Click="TrtRunButton_Click" />
+
+                            <TextBlock x:Name="Trt_StatusText" TextWrapping="Wrap" Foreground="DarkRed" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="0,0,8,8">
+                            <TextBlock Text="TRT result" FontWeight="Bold" FontSize="14" />
+                            <TextBlock x:Name="Trt_ResultText" TextWrapping="Wrap" Margin="0,4,0,10" FontSize="14" />
+
+                            <Border Style="{StaticResource ChartCard}" Height="340">
+                                <oxy:PlotView x:Name="Trt_Chart" IsMouseWheelEnabled="False" />
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
