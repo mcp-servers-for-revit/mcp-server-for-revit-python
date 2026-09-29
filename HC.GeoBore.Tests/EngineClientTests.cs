@@ -747,4 +747,59 @@ public class EngineClientTests
         var electricalPower = result.GetProperty("electrical_power_W").EnumerateArray().First().GetDouble();
         Assert.Equal(10000.0, groundLoad + electricalPower, 1e-6);
     }
+
+    [Fact]
+    public async Task FinancialSummary_ReportsAnExactPaybackForFlatSavingsThroughTheRealSubprocess()
+    {
+        // Same shape Fin_RunButton_Click sends: net capital 100000, flat 10000/yr savings -> exactly
+        // 10-year simple payback, no NPV/discounted fields when discount_rate is omitted.
+        var engine = EngineClient.CreateDefault();
+        var result = await engine.CallAsync("financial_summary", new Dictionary<string, object?>
+        {
+            ["total_length_m"] = 1000.0, ["cost_per_meter_drilled"] = 60.0,
+            ["n_boreholes"] = 8, ["fixed_cost_per_borehole"] = 5000.0,
+            ["heat_pump_equipment_cost"] = 0.0, ["other_fixed_costs"] = 0.0,
+            ["gshp_annual_electrical_energy_kWh"] = 10000.0, ["electricity_price_per_kWh"] = 0.0,
+            ["baseline_annual_operating_cost"] = 10000.0, ["analysis_period_years"] = 20,
+        });
+        Assert.Equal(100000.0, result.GetProperty("net_capital_cost").GetDouble(), 1e-6);
+        Assert.Equal(10.0, result.GetProperty("simple_payback_years").GetDouble(), 1e-6);
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("discounted_cumulative_cash_flow").ValueKind);
+    }
+
+    [Fact]
+    public async Task BaselineOperatingCost_SplitsHeatingAndCoolingThroughTheRealSubprocess()
+    {
+        var engine = EngineClient.CreateDefault();
+        var result = await engine.CallAsync("baseline_operating_cost", new Dictionary<string, object?>
+        {
+            ["hourly_load_W"] = new object?[] { 5000.0, 5000.0, -3000.0 },
+            ["baseline_heating_cost_per_kWh_delivered"] = 0.08,
+            ["baseline_cooling_cost_per_kWh_delivered"] = 0.15,
+        });
+        Assert.Equal(0.8, result.GetProperty("heating_cost").GetDouble(), 1e-6);
+        Assert.Equal(0.45, result.GetProperty("cooling_cost").GetDouble(), 1e-6);
+        Assert.Equal(1.25, result.GetProperty("total_annual_cost").GetDouble(), 1e-6);
+    }
+
+    [Fact]
+    public async Task CompareGenerators_RunsOneBaselineCostPerNamedProfileThroughTheRealSubprocess()
+    {
+        // Same shape Fin_RunButton_Click's "Compare against" grid sends.
+        var engine = EngineClient.CreateDefault();
+        var generators = new object?[]
+        {
+            new Dictionary<string, object?> { ["name"] = "Gas boiler + split AC", ["heating_cost_per_kWh_delivered"] = 0.08, ["cooling_cost_per_kWh_delivered"] = 0.15 },
+            new Dictionary<string, object?> { ["name"] = "Air-source heat pump", ["heating_cost_per_kWh_delivered"] = 0.05, ["cooling_cost_per_kWh_delivered"] = 0.05 },
+        };
+        var result = await engine.CallAsync("compare_generators", new Dictionary<string, object?>
+        {
+            ["hourly_load_W"] = new object?[] { 5000.0, 5000.0, -3000.0 }, ["generators"] = generators,
+        });
+        var rows = result.EnumerateArray().ToList();
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("Gas boiler + split AC", rows[0].GetProperty("name").GetString());
+        Assert.Equal("Air-source heat pump", rows[1].GetProperty("name").GetString());
+        Assert.True(rows[1].GetProperty("total_annual_cost").GetDouble() < rows[0].GetProperty("total_annual_cost").GetDouble());
+    }
 }

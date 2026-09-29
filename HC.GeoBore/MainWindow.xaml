@@ -904,6 +904,103 @@
                 </Grid>
             </TabItem>
 
+            <!-- ============================== TAB 6: FINANCIAL PLAN ============================== -->
+            <TabItem Header="Financial Plan">
+                <Grid Margin="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="320" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
+                        <StackPanel>
+                            <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,8"
+                                       Text="Uses the shared field/ground/pipe inputs and the current Borehole depth H directly (size it on the Sizing tab first, then enter that H here) -- runs its own heat-pump-coupled simulation using the COP curves from the Simulation tab's 'Heat pump coupling' group, so fill those in first. No cost or price below has a built-in default: every euro figure is real, site-specific data only you know." />
+
+                            <GroupBox Header="Capital costs" Margin="0,0,0,8">
+                                <StackPanel Margin="6">
+                                    <Label Content="Cost per meter drilled (€/m)" Padding="0" />
+                                    <TextBox x:Name="Fin_CostPerMeterBox" Text="" />
+                                    <Label Content="Fixed cost per borehole (€)" Padding="0,6,0,0" />
+                                    <TextBox x:Name="Fin_FixedCostPerBoreholeBox" Text="0" />
+                                    <Label Content="Heat pump equipment cost (€)" Padding="0,6,0,0" />
+                                    <TextBox x:Name="Fin_HeatPumpCostBox" Text="0" />
+                                    <Label Content="Other fixed costs (€)" Padding="0,6,0,0" />
+                                    <TextBox x:Name="Fin_OtherFixedCostsBox" Text="0" />
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="Energy pricing" Margin="0,0,0,8">
+                                <StackPanel Margin="6">
+                                    <Label Content="Electricity price (€/kWh)" Padding="0" />
+                                    <TextBox x:Name="Fin_ElectricityPriceBox" Text="" />
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="Compare against" Margin="0,0,0,8">
+                                <StackPanel Margin="6">
+                                    <TextBlock TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,0,0,4"
+                                               Text="One row per alternative heating/cooling generator to compare the GSHP design against -- add or remove rows freely. Each cost is per kWh of heat/cooling DELIVERED (not per kWh of fuel): your own fuel/electricity price divided by that generator's own rated efficiency (AFUE, COP, or EER converted to COP). This engine has no built-in database of typical equipment efficiencies -- every row is real data only you supply, sourced from that equipment's own datasheet." />
+                                    <DataGrid x:Name="Fin_GeneratorGrid" AutoGenerateColumns="False" CanUserAddRows="True" Height="140">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="1.3*" />
+                                            <DataGridTextColumn Header="Heating (€/kWh)" Binding="{Binding HeatingCostPerKWh}" Width="*" />
+                                            <DataGridTextColumn Header="Cooling (€/kWh)" Binding="{Binding CoolingCostPerKWh}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="Analysis settings" Margin="0,0,0,8">
+                                <StackPanel Margin="6">
+                                    <Label Content="Analysis period (years)" Padding="0" />
+                                    <TextBox x:Name="Fin_PeriodYearsBox" Text="20" />
+                                    <Label Content="Incentive / tax credit (% of capital cost)" Padding="0,6,0,0" />
+                                    <TextBox x:Name="Fin_IncentivePercentBox" Text="0" />
+                                    <Label Content="Energy price escalation (%/year)" Padding="0,6,0,0" />
+                                    <TextBox x:Name="Fin_EscalationPercentBox" Text="0" />
+                                    <CheckBox x:Name="Fin_DiscountEnabledCheckBox" Content="Apply a discount rate (NPV)"
+                                              Margin="0,8,0,0" Checked="Fin_DiscountEnabledCheckBox_Changed" Unchecked="Fin_DiscountEnabledCheckBox_Changed" />
+                                    <TextBox x:Name="Fin_DiscountPercentBox" Text="5.0" Margin="0,4,0,0" IsEnabled="False" />
+                                </StackPanel>
+                            </GroupBox>
+
+                            <Button x:Name="Fin_RunButton" Content="Run Financial Analysis"
+                                    Height="36" Margin="0,4,0,4" Click="Fin_RunButton_Click" />
+
+                            <TextBlock x:Name="Fin_StatusText" TextWrapping="Wrap" Foreground="DarkRed" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="0,0,8,8">
+                            <TextBlock Text="Financial summary" FontWeight="Bold" FontSize="14" />
+                            <TextBlock x:Name="Fin_SummaryText" TextWrapping="Wrap" Margin="0,4,0,10" FontSize="13" />
+
+                            <TextBlock Text="Comparison against each generator" FontWeight="Bold" FontSize="13" Margin="0,0,0,4" />
+                            <DataGrid x:Name="Fin_ComparisonGrid" Height="150" Margin="0,0,0,10" AutoGenerateColumns="False" IsReadOnly="True"
+                                      PreviewMouseWheel="DataGrid_PreviewMouseWheel">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="System" Binding="{Binding Name}" Width="1.3*" />
+                                    <DataGridTextColumn Header="Annual cost" Binding="{Binding AnnualCost, StringFormat={}{0:N0} €}" Width="*" />
+                                    <DataGridTextColumn Header="vs. GSHP" Binding="{Binding SavingsVsGshp, StringFormat={}{0:N0} €/yr}" Width="*" />
+                                    <DataGridTextColumn Header="Payback" Binding="{Binding PaybackLabel}" Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <Border Style="{StaticResource ChartCard}" Height="280" Margin="0,0,0,10">
+                                <oxy:PlotView x:Name="Fin_OperatingCostChart" IsMouseWheelEnabled="False" />
+                            </Border>
+
+                            <TextBlock Text="GSHP design's own cash flow" FontWeight="Bold" FontSize="13" Margin="0,0,0,4" />
+                            <Border Style="{StaticResource ChartCard}" Height="300">
+                                <oxy:PlotView x:Name="Fin_CashFlowChart" IsMouseWheelEnabled="False" />
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
         </TabControl>
     </Grid>
     </DockPanel>

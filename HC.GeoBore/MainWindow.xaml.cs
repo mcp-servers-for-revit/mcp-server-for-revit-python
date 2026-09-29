@@ -60,6 +60,23 @@ public sealed class CopCurveRow
     public double Cop { get; set; }
 }
 
+public sealed class GeneratorRow
+{
+    public string Name { get; set; } = "";
+    public double HeatingCostPerKWh { get; set; }
+    public double CoolingCostPerKWh { get; set; }
+}
+
+// Read-only display row for the Financial Plan tab's comparison grid -- one per generator in
+// _generatorRows, plus the annual cost / savings / payback financial_summary computed for it.
+public sealed class GeneratorComparisonRow
+{
+    public string Name { get; init; } = "";
+    public double AnnualCost { get; init; }
+    public double SavingsVsGshp { get; init; }
+    public string PaybackLabel { get; init; } = "";
+}
+
 public partial class MainWindow : Window
 {
     private const double SecondsPerYear = 8760.0 * 3600.0;
@@ -68,6 +85,7 @@ public partial class MainWindow : Window
     private const int SizingTabIndex = 2;
     private const int AreaSizingTabIndex = 3;
     private const int TrtTabIndex = 4;
+    private const int FinancialTabIndex = 5;
 
     private static readonly string[] MonthNames =
         { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
@@ -86,6 +104,8 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<GroundLayerRow> _groundLayerRows = new();
     private readonly ObservableCollection<CopCurveRow> _heatPumpHeatingCurveRows = new();
     private readonly ObservableCollection<CopCurveRow> _heatPumpCoolingCurveRows = new();
+    private readonly ObservableCollection<GeneratorRow> _generatorRows = new();
+    private readonly ObservableCollection<GeneratorComparisonRow> _comparisonRows = new();
     private List<JsonElement> _pipeCatalog = new();
     private List<JsonElement> _groutCatalog = new();
     private List<JsonElement> _currentPipeProducts = new();
@@ -105,6 +125,8 @@ public partial class MainWindow : Window
         GroundLayerGrid.ItemsSource = _groundLayerRows;
         HeatPumpHeatingCurveGrid.ItemsSource = _heatPumpHeatingCurveRows;
         HeatPumpCoolingCurveGrid.ItemsSource = _heatPumpCoolingCurveRows;
+        Fin_GeneratorGrid.ItemsSource = _generatorRows;
+        Fin_ComparisonGrid.ItemsSource = _comparisonRows;
         InitializeCharts();
 
         foreach (var row in BuildDefaultMonthlyLoadRows())
@@ -122,6 +144,12 @@ public partial class MainWindow : Window
             _heatPumpHeatingCurveRows.Add(new CopCurveRow { EftC = eft, Cop = cop });
         foreach (var (eft, cop) in new[] { (10.0, 4.0), (20.0, 5.0), (30.0, 6.0), (40.0, 4.5) })
             _heatPumpCoolingCurveRows.Add(new CopCurveRow { EftC = eft, Cop = cop });
+        // Clearly-made-up example generator profiles (illustrative efficiency assumptions folded
+        // into a single cost-per-kWh-delivered each) -- same "runnable out of the box, replace
+        // before relying on it" precedent as the other example data above.
+        _generatorRows.Add(new GeneratorRow { Name = "Gas boiler + split AC", HeatingCostPerKWh = 0.087, CoolingCostPerKWh = 0.067 });
+        _generatorRows.Add(new GeneratorRow { Name = "Air-source heat pump", HeatingCostPerKWh = 0.0625, CoolingCostPerKWh = 0.057 });
+        _generatorRows.Add(new GeneratorRow { Name = "Electric resistance + split AC", HeatingCostPerKWh = 0.20, CoolingCostPerKWh = 0.057 });
 
         try
         {
@@ -235,18 +263,22 @@ public partial class MainWindow : Window
         N1N2HintText.Visibility = (isAreaSizing || isTrt) ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
 
         var isGfunction = index == GfunctionTabIndex;
+        var isFinancial = index == FinancialTabIndex;
         // The monthly load grid has no role on g-Function (no load concept), Area Sizing (which
         // synthesizes its own load from the two peak values instead), or TRT (its own log-data
-        // grid replaces it).
+        // grid replaces it) -- Financial Plan needs it too (it's read as the BUILDING load there).
         LoadProfileGroup.IsEnabled = !isGfunction && !isAreaSizing && !isTrt;
         // The tower group is a manual "what if" input on Simulation/Sizing; on Area Sizing the
         // tower capacity (if any) is instead a solved-for output, shown in that tab's results; TRT
-        // doesn't run a tower at all.
-        TowerGroup.IsEnabled = !isGfunction && !isAreaSizing && !isTrt;
+        // doesn't run a tower at all; Financial Plan doesn't model a tower either (no Python-side
+        // support for tower + heat pump coupling + financial analysis together -- same scope cut as
+        // Simulation's own heat-pump/tower mutual exclusion).
+        TowerGroup.IsEnabled = !isGfunction && !isAreaSizing && !isTrt && !isFinancial;
         // MIFT/UBWT choice only applies where this engine actually sizes/simulates against a
         // g-function -- not on g-Function (which has its own BoundaryConditionCombo already), Area
         // Sizing (not wired through that tab's own sizing calls yet), or TRT (a different fit
         // entirely, always solved via UBWT machinery -- see geothermal/trt.py's own docstring).
+        // Financial Plan runs its own simulation internally, so it uses this toggle too.
         SimSizeBoundaryConditionGroup.IsEnabled = !isGfunction && !isAreaSizing && !isTrt;
         // Ground drift / multipole order / short-term capacitance: same gating as the g-function
         // accuracy group -- only meaningful where this engine actually sizes/simulates.
@@ -606,6 +638,11 @@ public partial class MainWindow : Window
 
     private static string SelectedText(ComboBox combo) =>
         ((ComboBoxItem)combo.SelectedItem).Content?.ToString() ?? string.Empty;
+
+    // Explicit euro formatting for the Financial Plan tab -- deliberately not ":C0" (which follows
+    // CultureInfo.CurrentCulture and would silently show $ or another symbol on a differently
+    // localized machine); this app's financial figures are always euro-denominated.
+    private static string FormatEuro(double value) => $"{value:N0} €";
 
     // Builds the synthetic annual wet-bulb-temperature series (no real weather-file import
     // yet -- see geothermal/hybrid.py's synthetic_wet_bulb_series). minBox/maxBox let the two
@@ -1739,6 +1776,233 @@ public partial class MainWindow : Window
         finally
         {
             TrtRunButton.IsEnabled = true;
+        }
+    }
+
+    private void Fin_DiscountEnabledCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (Fin_DiscountPercentBox == null) return; // guard against the early-firing routed event during InitializeComponent()
+        Fin_DiscountPercentBox.IsEnabled = Fin_DiscountEnabledCheckBox.IsChecked == true;
+    }
+
+    private async void Fin_RunButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_engine is null)
+        {
+            Fin_StatusText.Text = "Engine not available -- see message above.";
+            return;
+        }
+        if (!ValidatePipeAndGroutSelected(Fin_StatusText)) return;
+        if (_heatPumpHeatingCurveRows.Count < 2 || _heatPumpCoolingCurveRows.Count < 2)
+        {
+            Fin_StatusText.Text = "Fill in both heat pump COP curves on the Simulation tab first (needs at least 2 rows each).";
+            return;
+        }
+        if (_generatorRows.Count == 0)
+        {
+            Fin_StatusText.Text = "Add at least one generator to compare against in the 'Compare against' grid.";
+            return;
+        }
+
+        Fin_RunButton.IsEnabled = false;
+        Fin_StatusText.Foreground = Brushes.DarkRed;
+        Fin_StatusText.Text = "Running...";
+        Fin_SummaryText.Text = string.Empty;
+        _comparisonRows.Clear();
+        Fin_CashFlowChart.Model = Charts.Empty("Cumulative project cash flow");
+        Fin_OperatingCostChart.Model = Charts.Empty("Annual operating cost by system");
+
+        try
+        {
+            var n1 = ParseInt(N1Box, "Boreholes X");
+            var n2 = ParseInt(N2Box, "Boreholes Y");
+            var spacing = ParseDouble(SpacingBox, "Spacing");
+            var depth = ParseDouble(DepthBox, "Borehole depth H");
+            var buriedDepth = ParseDouble(BuriedDepthBox, "Buried depth D");
+            var boreholeRadius = ParseDouble(BoreholeRadiusBox, "Borehole radius");
+            var alpha = ParseDouble(AlphaBox, "Ground diffusivity");
+            var conductivity = ParseDouble(ConductivityBox, "Ground conductivity");
+            var groundTemp = ParseDouble(GroundTempBox, "Ground temperature");
+            var periodYears = ParseInt(Fin_PeriodYearsBox, "Analysis period");
+
+            var pipeConfig = BuildPipeConfig();
+            var flowPerBorehole = ParseDouble(FlowPerBoreholeBox, "Flow per borehole");
+            var fluidStr = SelectedText(FluidCombo);
+            var fluidPercent = ParseDouble(FluidPercentBox, "Fluid percent");
+            var fluidTemp = ParseDouble(FluidTemperatureBox, "Fluid temperature");
+
+            var field = await _engine.CallAsync("build_rectangle_field", new Dictionary<string, object?>
+            {
+                ["N_1"] = n1, ["N_2"] = n2, ["B_1"] = spacing, ["B_2"] = spacing,
+                ["H"] = depth, ["D"] = buriedDepth, ["r_b"] = boreholeRadius,
+            });
+
+            var (baseHeating, baseCooling, peakHeating, peakCooling) = ExtractMonthlyLoads(_loadRows);
+            var hourlyResult = await _engine.CallAsync("synthesize_hourly_load", new Dictionary<string, object?>
+            {
+                ["baseload_heating_kWh"] = baseHeating,
+                ["baseload_cooling_kWh"] = baseCooling,
+                ["peak_heating_kW"] = peakHeating,
+                ["peak_cooling_kW"] = peakCooling,
+            });
+            var oneYearBuildingLoad = hourlyResult.EnumerateArray().Select(x => x.GetDouble()).ToList();
+            var repeatedBuildingLoad = new List<double>(oneYearBuildingLoad.Count * periodYears);
+            for (var y = 0; y < periodYears; y++)
+                repeatedBuildingLoad.AddRange(oneYearBuildingLoad);
+
+            var boreholeCapacitanceJmK = await BuildBoreholeCapacitanceJmKAsync(pipeConfig, boreholeRadius);
+            var commonSimArgs = new Dictionary<string, object?>
+            {
+                ["field"] = field, ["alpha"] = alpha, ["k_s"] = conductivity, ["k_g"] = ParseDouble(GroutConductivityBox, "Grout conductivity"),
+                ["T_g"] = groundTemp, ["pipe_config"] = pipeConfig, ["m_flow_borehole"] = flowPerBorehole,
+                ["fluid_str"] = fluidStr, ["fluid_percent"] = fluidPercent, ["fluid_temperature_C"] = fluidTemp,
+                ["algorithm"] = "ClaessonJaved", ["gfunc_boundary_condition"] = GetGfuncBoundaryCondition(),
+                ["T_g_drift_C_per_year"] = ParseDouble(GroundDriftBox, "Ground temperature drift"),
+                ["multipole_order"] = ParseInt(MultipoleOrderBox, "Multipole order"),
+                ["borehole_capacitance_J_mK"] = boreholeCapacitanceJmK,
+            };
+
+            // Same 3-pass iterative refinement as Simulation's heat-pump coupling (see
+            // heat_pump.py's own docstring) -- the building load here, not the ground load.
+            var heatingCurve = _heatPumpHeatingCurveRows.Select(r => new[] { r.EftC, r.Cop }).ToList();
+            var coolingCurve = _heatPumpCoolingCurveRows.Select(r => new[] { r.EftC, r.Cop }).ToList();
+            var eftGuess = Enumerable.Repeat(groundTemp, repeatedBuildingLoad.Count).ToList();
+            JsonElement hpResult = default;
+            JsonElement simResult = default;
+            for (var pass = 0; pass < 3; pass++)
+            {
+                hpResult = await _engine.CallAsync("apply_heat_pump", new Dictionary<string, object?>
+                {
+                    ["building_load_W"] = repeatedBuildingLoad, ["eft_C"] = eftGuess,
+                    ["cop_heating_curve"] = heatingCurve, ["cop_cooling_curve"] = coolingCurve,
+                });
+                var groundLoadHp = hpResult.GetProperty("ground_load_W").EnumerateArray().Select(x => x.GetDouble()).ToList();
+                simResult = await _engine.CallAsync("run_hourly_simulation", new Dictionary<string, object?>(commonSimArgs)
+                {
+                    ["hourly_load_W"] = groundLoadHp,
+                });
+                eftGuess = simResult.GetProperty("T_f_C").EnumerateArray().Select(x => x.GetDouble()).ToList();
+            }
+
+            var totalLengthM = simResult.GetProperty("total_length_m").GetDouble();
+            var totalElectricalEnergyKWh = hpResult.GetProperty("total_electrical_energy_kWh").GetDouble();
+            var gshpAnnualElectricalEnergyKWh = totalElectricalEnergyKWh / periodYears;
+
+            var generators = _generatorRows.Select(r => new Dictionary<string, object?>
+            {
+                ["name"] = r.Name, ["heating_cost_per_kWh_delivered"] = r.HeatingCostPerKWh,
+                ["cooling_cost_per_kWh_delivered"] = r.CoolingCostPerKWh,
+            }).ToList();
+            var comparisonResult = await _engine.CallAsync("compare_generators", new Dictionary<string, object?>
+            {
+                ["hourly_load_W"] = oneYearBuildingLoad, ["generators"] = generators,
+            });
+
+            var discountEnabled = Fin_DiscountEnabledCheckBox.IsChecked == true;
+            Dictionary<string, object?> BuildFinancialArgs(double baselineAnnualCost) => new()
+            {
+                ["total_length_m"] = totalLengthM,
+                ["cost_per_meter_drilled"] = ParseDouble(Fin_CostPerMeterBox, "Cost per meter drilled"),
+                ["n_boreholes"] = n1 * n2,
+                ["fixed_cost_per_borehole"] = ParseDouble(Fin_FixedCostPerBoreholeBox, "Fixed cost per borehole"),
+                ["heat_pump_equipment_cost"] = ParseDouble(Fin_HeatPumpCostBox, "Heat pump equipment cost"),
+                ["other_fixed_costs"] = ParseDouble(Fin_OtherFixedCostsBox, "Other fixed costs"),
+                ["gshp_annual_electrical_energy_kWh"] = gshpAnnualElectricalEnergyKWh,
+                ["electricity_price_per_kWh"] = ParseDouble(Fin_ElectricityPriceBox, "Electricity price"),
+                ["baseline_annual_operating_cost"] = baselineAnnualCost,
+                ["analysis_period_years"] = periodYears,
+                ["incentive_fraction"] = ParseDouble(Fin_IncentivePercentBox, "Incentive percentage") / 100.0,
+                ["energy_price_escalation_rate"] = ParseDouble(Fin_EscalationPercentBox, "Energy price escalation") / 100.0,
+            };
+
+            // One financial_summary call per generator -- capital cost and the GSHP's own operating
+            // cost are identical across all of them (only the baseline being compared against
+            // changes), so payback/NPV are the only figures that differ row to row.
+            JsonElement headlineFin = default;
+            var headlineGeneratorName = "";
+            var gshpOpexForChart = 0.0;
+            var barLabels = new List<(string Label, double Cost)>();
+            foreach (var gen in comparisonResult.EnumerateArray())
+            {
+                var name = gen.GetProperty("name").GetString() ?? "(unnamed)";
+                var annualCost = gen.GetProperty("total_annual_cost").GetDouble();
+                var financialArgs = BuildFinancialArgs(annualCost);
+                if (discountEnabled)
+                    financialArgs["discount_rate"] = ParseDouble(Fin_DiscountPercentBox, "Discount rate") / 100.0;
+                var finResult = await _engine.CallAsync("financial_summary", financialArgs);
+                if (headlineGeneratorName == "")
+                {
+                    headlineFin = finResult;
+                    headlineGeneratorName = name;
+                    gshpOpexForChart = finResult.GetProperty("gshp_annual_operating_cost").GetDouble();
+                }
+
+                var firstYearSavings = finResult.GetProperty("first_year_savings").GetDouble();
+                var simplePaybackProp = finResult.GetProperty("simple_payback_years");
+                var paybackLabel = simplePaybackProp.ValueKind == JsonValueKind.Number
+                    ? $"{simplePaybackProp.GetDouble():N1} yr"
+                    : "never";
+                _comparisonRows.Add(new GeneratorComparisonRow
+                {
+                    Name = name, AnnualCost = annualCost, SavingsVsGshp = firstYearSavings, PaybackLabel = paybackLabel,
+                });
+                barLabels.Add((name, annualCost));
+            }
+
+            var grossCapital = headlineFin.GetProperty("gross_capital_cost").GetDouble();
+            var netCapital = headlineFin.GetProperty("net_capital_cost").GetDouble();
+            var incentiveAmount = headlineFin.GetProperty("incentive_amount").GetDouble();
+            var headlineSavings = headlineFin.GetProperty("first_year_savings").GetDouble();
+            var headlinePaybackProp = headlineFin.GetProperty("simple_payback_years");
+            var cumulativeCashFlow = ReadDoubleArray(headlineFin, "cumulative_cash_flow");
+
+            var summary =
+                $"Capital cost: {FormatEuro(grossCapital)} gross" +
+                (incentiveAmount > 0 ? $", {FormatEuro(incentiveAmount)} incentive, {FormatEuro(netCapital)} net" : "") +
+                $" ({totalLengthM:N0} m drilled, {n1 * n2} boreholes).\n" +
+                $"Annual operating cost: {FormatEuro(gshpOpexForChart)}/yr geothermal vs. {headlineGeneratorName} " +
+                $"({FormatEuro(Math.Abs(headlineSavings))}/yr {(headlineSavings >= 0 ? "saved" : "more expensive")}) -- " +
+                "see the full comparison table for every generator entered.\n" +
+                (headlinePaybackProp.ValueKind == JsonValueKind.Number
+                    ? $"Simple payback vs. {headlineGeneratorName}: {headlinePaybackProp.GetDouble():N1} years."
+                    : $"Simple payback vs. {headlineGeneratorName}: never (that baseline is cheaper to operate than this design).");
+
+            if (discountEnabled)
+            {
+                var npvProp = headlineFin.GetProperty("net_present_value");
+                var discPaybackProp = headlineFin.GetProperty("discounted_payback_years");
+                summary += $"\nNet present value ({ParseDouble(Fin_DiscountPercentBox, "Discount rate"):N1}% discount): " +
+                    $"{(npvProp.ValueKind == JsonValueKind.Number ? FormatEuro(npvProp.GetDouble()) : "n/a")}. " +
+                    "Discounted payback: " +
+                    (discPaybackProp.ValueKind == JsonValueKind.Number ? $"{discPaybackProp.GetDouble():N1} years." : "never.");
+            }
+
+            Fin_SummaryText.Text = summary;
+
+            double[]? discountedCashFlow = null;
+            if (headlineFin.TryGetProperty("discounted_cumulative_cash_flow", out var discountedProp) && discountedProp.ValueKind == JsonValueKind.Array)
+                discountedCashFlow = ReadDoubleArray(headlineFin, "discounted_cumulative_cash_flow");
+            Fin_CashFlowChart.Model = Charts.CashFlow(netCapital, cumulativeCashFlow, discountedCashFlow);
+
+            var allBars = new List<(string Label, double Cost)> { ("Geothermal (GSHP)", gshpOpexForChart) };
+            allBars.AddRange(barLabels);
+            Fin_OperatingCostChart.Model = Charts.OperatingCostComparison(allBars);
+
+            Fin_StatusText.Text = string.Empty;
+        }
+        catch (EngineException ex)
+        {
+            Fin_StatusText.Text = ex.PythonTraceback is null
+                ? $"Engine error: {ex.Message}"
+                : $"Engine error: {ex.Message}\n\n{ex.PythonTraceback}";
+        }
+        catch (Exception ex)
+        {
+            Fin_StatusText.Text = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            Fin_RunButton.IsEnabled = true;
         }
     }
 

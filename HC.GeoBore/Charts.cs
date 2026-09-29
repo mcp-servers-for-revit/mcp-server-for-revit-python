@@ -381,4 +381,63 @@ public static class Charts
         AddBottomLegend(model);
         return model;
     }
+
+    /// <summary>Cumulative project cash flow starting at year 0 (-net capital cost, before any
+    /// savings), then +savings each year -- where the line crosses zero is the payback point.
+    /// discountedCashFlow (optional) overlays the same series with a discount rate applied, always
+    /// at or below the undiscounted one since discounting can only reduce the present value of
+    /// future savings. Both arrays are the engine's own year-1..N cumulative values (year 0 is
+    /// prepended here from netCapitalCost, not part of either array).</summary>
+    public static PlotModel CashFlow(double netCapitalCost, IReadOnlyList<double> cumulativeCashFlow, IReadOnlyList<double>? discountedCashFlow = null)
+    {
+        var model = NewModel("Cumulative project cash flow", "Crosses zero at the payback year");
+        model.Axes.Add(ValueAxis(AxisPosition.Bottom, "Year", 0, cumulativeCashFlow.Count));
+
+        var allValues = new List<double> { -netCapitalCost };
+        allValues.AddRange(cumulativeCashFlow);
+        if (discountedCashFlow is not null) allValues.AddRange(discountedCashFlow);
+        var yLo = Math.Min(0.0, allValues.Min());
+        var yHi = Math.Max(0.0, allValues.Max());
+        var pad = Math.Max(1.0, (yHi - yLo) * 0.08);
+        model.Axes.Add(ValueAxis(AxisPosition.Left, "Cumulative cash flow ($)", yLo - pad, yHi + pad));
+
+        var series = new LineSeries { Title = "Simple (undiscounted)", Color = Blue, StrokeThickness = 2, MarkerType = MarkerType.Circle, MarkerSize = 2.5, MarkerFill = Blue };
+        series.Points.Add(new DataPoint(0, -netCapitalCost));
+        for (var i = 0; i < cumulativeCashFlow.Count; i++)
+            series.Points.Add(new DataPoint(i + 1, cumulativeCashFlow[i]));
+        model.Series.Add(series);
+
+        if (discountedCashFlow is not null && discountedCashFlow.Count > 0)
+        {
+            var discounted = new LineSeries { Title = "Discounted (NPV)", Color = Teal, StrokeThickness = 2, LineStyle = LineStyle.Dash };
+            discounted.Points.Add(new DataPoint(0, -netCapitalCost));
+            for (var i = 0; i < discountedCashFlow.Count; i++)
+                discounted.Points.Add(new DataPoint(i + 1, discountedCashFlow[i]));
+            model.Series.Add(discounted);
+        }
+
+        model.Annotations.Add(new LineAnnotation { Type = LineAnnotationType.Horizontal, Y = 0, Color = Grey, LineStyle = LineStyle.Solid, StrokeThickness = 1 });
+        AddBottomLegend(model);
+        return model;
+    }
+
+    /// <summary>Annual operating cost by system -- the geothermal design plus every generator it's
+    /// being compared against, cheapest to run first. Same bar-chart shape as DepthComparison, but
+    /// the geothermal design's own bar keeps a distinct color so it stays visually anchored even
+    /// after sorting by cost.</summary>
+    public static PlotModel OperatingCostComparison(IReadOnlyList<(string Label, double Cost)> bars)
+    {
+        var model = NewModel("Annual operating cost by system");
+        var ordered = bars.OrderBy(b => b.Cost).ToList();
+        var category = new CategoryAxis { Position = AxisPosition.Left, StartPosition = 1, EndPosition = 0, GapWidth = 0.5 };
+        foreach (var bar in ordered) category.Labels.Add(bar.Label);
+        model.Axes.Add(category);
+        model.Axes.Add(ValueAxis(AxisPosition.Bottom, "Annual operating cost (€/yr)", 0, ordered.Max(b => b.Cost) * 1.25));
+
+        var series = new BarSeries { LabelPlacement = LabelPlacement.Outside, LabelFormatString = "{0:N0} €", StrokeColor = OxyColors.Transparent };
+        for (var i = 0; i < ordered.Count; i++)
+            series.Items.Add(new BarItem(ordered[i].Cost, i) { Color = ordered[i].Label.StartsWith("Geothermal", StringComparison.Ordinal) ? Teal : Blue });
+        model.Series.Add(series);
+        return model;
+    }
 }

@@ -252,6 +252,26 @@ def _groundwater_steady_state_effect(args: dict[str, Any]) -> Any:
     return groundwater.groundwater_steady_state_effect(**args)
 
 
+# ---- economics / financial plan --------------------------------------------
+
+@command("baseline_operating_cost")
+def _baseline_operating_cost(args: dict[str, Any]) -> Any:
+    from geothermal import economics
+    return economics.baseline_operating_cost(**args)
+
+
+@command("compare_generators")
+def _compare_generators(args: dict[str, Any]) -> Any:
+    from geothermal import economics
+    return economics.compare_generators(**args)
+
+
+@command("financial_summary")
+def _financial_summary(args: dict[str, Any]) -> Any:
+    from geothermal import economics
+    return economics.financial_summary(**args)
+
+
 # ---- heat pump coupling ---------------------------------------------------
 
 @command("apply_heat_pump")
