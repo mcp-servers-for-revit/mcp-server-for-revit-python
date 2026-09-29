@@ -1,0 +1,20 @@
+{
+  "_note": "Real, sourced standing incentive RATES only -- a one-off grant program (fixed euro amount, an application deadline, a limited fund) is NOT a rate and does not belong here; a jurisdiction with only that kind of program is deliberately left out rather than represented by a stale or misleading percentage. Researched 2026-09-29: no comparably stable, ongoing, percentage-of-capital-cost commercial incentive was found for the EU/Bulgaria at that time (EU heat pump support is fragmented -- national grants, VAT reductions, subsidized loans, each program-specific and often residential-only) -- add a jurisdiction here only once a real, current, citable standing rate is found for it.",
+  "presets": [
+    {
+      "id": "us_commercial_itc_section48",
+      "jurisdiction": "United States -- commercial (Section 48 Investment Tax Credit)",
+      "base_fraction": 0.06,
+      "enhanced_fraction": 0.30,
+      "enhanced_condition": "net output under 1 MW, OR the project meets prevailing-wage-and-apprenticeship (PWA) requirements",
+      "bonus_fraction": 0.10,
+      "bonus_condition": "domestic-content materials, in a designated energy community, construction begun before 2035",
+      "phase_down": "5.2% in 2033, 4.4% in 2034, sunsets for projects beginning construction in 2035",
+      "no_cap": true,
+      "carryforward": "unused credit may be carried back 1 year or forward up to 20 years",
+      "source": "Plante Moran, \"Geothermal heat pump systems tax incentives\", https://www.plantemoran.com/explore-our-thinking/insight/2026/02/geothermal-heat-pump-systems-tax-incentives, retrieved 2026-09-29",
+      "as_of": "2026-09-29",
+      "notes": "This preset fills in the BASE rate only (6%) -- the enhanced 30% and +10% bonus rates both have real eligibility conditions this software cannot verify (project size, wage compliance, site location, construction timing). Raise the percentage manually once you've confirmed your own project actually qualifies; this is not tax or legal advice. Applies to COMMERCIAL projects -- the separate residential Section 25D credit (30%, uncapped) was terminated for any expenditure after December 31, 2025 by the One Big Beautiful Bill Act and has no current replacement."
+    }
+  ]
+}

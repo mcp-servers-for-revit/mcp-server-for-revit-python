@@ -955,8 +955,13 @@
                                 <StackPanel Margin="6">
                                     <Label Content="Analysis period (years)" Padding="0" />
                                     <TextBox x:Name="Fin_PeriodYearsBox" Text="20" />
+                                    <Label Content="Incentive / tax credit jurisdiction" Padding="0,6,0,0" />
+                                    <ComboBox x:Name="Fin_IncentivePresetCombo" SelectedIndex="0" SelectionChanged="Fin_IncentivePresetCombo_SelectionChanged">
+                                        <ComboBoxItem Content="Custom (enter manually below)" />
+                                    </ComboBox>
                                     <Label Content="Incentive / tax credit (% of capital cost)" Padding="0,6,0,0" />
                                     <TextBox x:Name="Fin_IncentivePercentBox" Text="0" />
+                                    <TextBlock x:Name="Fin_IncentivePresetHintText" TextWrapping="Wrap" FontStyle="Italic" FontSize="10" Foreground="Gray" Margin="0,2,0,0" />
                                     <Label Content="Energy price escalation (%/year)" Padding="0,6,0,0" />
                                     <TextBox x:Name="Fin_EscalationPercentBox" Text="0" />
                                     <CheckBox x:Name="Fin_DiscountEnabledCheckBox" Content="Apply a discount rate (NPV)"

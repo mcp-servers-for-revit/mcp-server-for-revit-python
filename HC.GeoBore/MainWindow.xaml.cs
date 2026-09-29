@@ -107,6 +107,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<GeneratorRow> _generatorRows = new();
     private readonly ObservableCollection<GeneratorComparisonRow> _comparisonRows = new();
     private List<JsonElement> _pipeCatalog = new();
+    private List<JsonElement> _incentivePresets = new();
     private List<JsonElement> _groutCatalog = new();
     private List<JsonElement> _currentPipeProducts = new();
     private List<JsonElement> _currentGroutProducts = new();
@@ -216,6 +217,11 @@ public partial class MainWindow : Window
             var groutManufacturers = await _engine.CallAsync("list_grout_manufacturers");
             foreach (var m in groutManufacturers.EnumerateArray())
                 GroutManufacturerCombo.Items.Add(new ComboBoxItem { Content = m.GetString() });
+
+            var incentivesResult = await _engine.CallAsync("list_incentive_presets");
+            _incentivePresets = incentivesResult.EnumerateArray().ToList();
+            foreach (var preset in _incentivePresets)
+                Fin_IncentivePresetCombo.Items.Add(new ComboBoxItem { Content = preset.GetProperty("jurisdiction").GetString() });
         }
         catch (EngineException ex)
         {
@@ -1783,6 +1789,38 @@ public partial class MainWindow : Window
     {
         if (Fin_DiscountPercentBox == null) return; // guard against the early-firing routed event during InitializeComponent()
         Fin_DiscountPercentBox.IsEnabled = Fin_DiscountEnabledCheckBox.IsChecked == true;
+    }
+
+    private void Fin_IncentivePresetCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Fin_IncentivePresetCombo's own XAML-set SelectedIndex="0" fires this during
+        // InitializeComponent(), before Fin_IncentivePercentBox/Fin_IncentivePresetHintText (declared
+        // after it in the same GroupBox) exist -- guard on the LAST control this method touches, same
+        // gotcha as TowerStrategyCombo_SelectionChanged/UpdateTowerControlsAvailability above.
+        if (Fin_IncentivePresetHintText == null) return;
+
+        var index = Fin_IncentivePresetCombo.SelectedIndex;
+        if (index <= 0 || index - 1 >= _incentivePresets.Count)
+        {
+            // "Custom" (index 0), or nothing usable loaded yet -- unlock manual entry.
+            Fin_IncentivePercentBox.IsEnabled = true;
+            Fin_IncentivePresetHintText.Text = "";
+            return;
+        }
+
+        var preset = _incentivePresets[index - 1];
+        var baseFraction = preset.GetProperty("base_fraction").GetDouble();
+        Fin_IncentivePercentBox.Text = (baseFraction * 100.0).ToString("0.##", CultureInfo.InvariantCulture);
+        Fin_IncentivePercentBox.IsEnabled = false;
+
+        var hint = $"Base rate only ({baseFraction * 100:0.##}%), as of {preset.GetProperty("as_of").GetString()} -- {preset.GetProperty("notes").GetString()}";
+        if (preset.TryGetProperty("enhanced_fraction", out var enhancedProp))
+        {
+            hint += $"\nEnhanced rate {enhancedProp.GetDouble() * 100:0.##}% if: {preset.GetProperty("enhanced_condition").GetString()} " +
+                    "-- not auto-applied; switch to Custom and enter it yourself once you've confirmed eligibility.";
+        }
+        hint += $"\nSource: {preset.GetProperty("source").GetString()}";
+        Fin_IncentivePresetHintText.Text = hint;
     }
 
     private async void Fin_RunButton_Click(object sender, RoutedEventArgs e)

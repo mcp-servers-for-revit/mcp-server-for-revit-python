@@ -802,4 +802,18 @@ public class EngineClientTests
         Assert.Equal("Air-source heat pump", rows[1].GetProperty("name").GetString());
         Assert.True(rows[1].GetProperty("total_annual_cost").GetDouble() < rows[0].GetProperty("total_annual_cost").GetDouble());
     }
+
+    [Fact]
+    public async Task ListIncentivePresets_IncludesTheResearchedUsCommercialItcThroughTheRealSubprocess()
+    {
+        // Same shape Window_Loaded sends to populate Fin_IncentivePresetCombo.
+        var engine = EngineClient.CreateDefault();
+        var result = await engine.CallAsync("list_incentive_presets");
+        var presets = result.EnumerateArray().ToList();
+        Assert.NotEmpty(presets);
+        var usItc = presets.FirstOrDefault(p => p.GetProperty("id").GetString() == "us_commercial_itc_section48");
+        Assert.True(usItc.ValueKind == JsonValueKind.Object, "expected the researched US commercial Section 48 ITC preset");
+        Assert.Equal(0.06, usItc.GetProperty("base_fraction").GetDouble(), 1e-6);
+        Assert.False(string.IsNullOrWhiteSpace(usItc.GetProperty("source").GetString()));
+    }
 }

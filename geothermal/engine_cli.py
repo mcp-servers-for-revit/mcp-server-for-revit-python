@@ -266,6 +266,12 @@ def _compare_generators(args: dict[str, Any]) -> Any:
     return economics.compare_generators(**args)
 
 
+@command("list_incentive_presets")
+def _list_incentive_presets(args: dict[str, Any]) -> Any:
+    from geothermal import incentive_presets
+    return incentive_presets.list_incentive_presets()
+
+
 @command("financial_summary")
 def _financial_summary(args: dict[str, Any]) -> Any:
     from geothermal import economics
