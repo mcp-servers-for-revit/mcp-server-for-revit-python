@@ -1,0 +1,81 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Generate Layout - Program" Height="820" Width="680"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="boundaryInfoText" Text="Boundary: (select a Room or Floor first)"
+                   FontWeight="Bold" Margin="0,0,0,8" TextWrapping="Wrap"/>
+
+        <TextBlock Grid.Row="1"
+                   Text="Enclosed rooms (need real walls/doors - private offices, conference rooms, etc.): enter Width x Depth as an exact size (e.g. 10) or a range (e.g. 10-14) to vary each instance's size. Category is optional (defaults to Room Name) and controls color-coding."
+                   TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+        <DataGrid Grid.Row="2" x:Name="enclosedGrid" AutoGenerateColumns="True"
+                  CanUserAddRows="True" CanUserDeleteRows="True"
+                  CanUserSortColumns="False" ColumnWidth="*" Margin="0,0,0,10"/>
+
+        <TextBlock Grid.Row="3"
+                   Text="Open zones / areas (no walls needed - reception, break areas, open office): a target area, they fill whatever space is left. Min Width keeps them from becoming an unusably thin sliver if the leftover space is narrow (defaults to 6ft if left blank)."
+                   TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+        <DataGrid Grid.Row="4" x:Name="openGrid" AutoGenerateColumns="True"
+                  CanUserAddRows="True" CanUserDeleteRows="True"
+                  CanUserSortColumns="False" ColumnWidth="*" Margin="0,0,0,10"/>
+
+        <Grid Grid.Row="5" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="60"/>
+                <ColumnDefinition Width="20"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="60"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Corridor width (ft):" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <TextBox Grid.Column="1" x:Name="corridorWidthBox" Text="5.0"/>
+            <TextBlock Grid.Column="2" Text=""/>
+            <TextBlock Grid.Column="3" Text="Number of options (1-5):" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <TextBox Grid.Column="4" x:Name="optionCountBox" Text="3"/>
+        </Grid>
+
+        <Grid Grid.Row="6" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="0" Content="Recalculate" Width="100" Height="24" Click="on_recalculate" Margin="0,0,10,0"/>
+            <TextBlock Grid.Column="1" x:Name="programSummaryText"
+                       Text="Click Recalculate to see programmed vs. available sf."
+                       VerticalAlignment="Center" TextWrapping="Wrap"/>
+        </Grid>
+
+        <StackPanel Grid.Row="7" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="Generation mode:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <RadioButton x:Name="fixedModeRadio" GroupName="genMode" Content="Fixed variations"
+                         IsChecked="True" VerticalAlignment="Center" Margin="0,0,16,0"/>
+            <RadioButton x:Name="randomModeRadio" GroupName="genMode" Content="Randomized (best of N)"
+                         VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="8"
+                   Text="Layout is a design aid only, not a code compliance review. Verify corridor width, egress distance, and occupancy against the applicable code before use."
+                   TextWrapping="Wrap" FontStyle="Italic" Foreground="DimGray" Margin="0,0,0,8"/>
+
+        <StackPanel Grid.Row="9" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" Width="90" Height="26" Margin="0,0,10,0" Click="on_cancel"/>
+            <Button Content="Generate" Width="90" Height="26" Click="on_generate"/>
+        </StackPanel>
+    </Grid>
+</Window>

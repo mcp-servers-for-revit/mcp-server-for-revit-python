@@ -58,6 +58,18 @@ def get_element_name(element):
         return DB.Element.Name.__get__(element)
 
 
+def set_element_name(element, new_name):
+    """
+    Set the name of a Revit element.
+    Mirrors get_element_name's fallback for API versions where Element.Name
+    is not directly settable as an instance attribute.
+    """
+    try:
+        element.Name = new_name
+    except AttributeError:
+        DB.Element.Name.__set__(element, new_name)
+
+
 def find_family_symbol_safely(doc, target_family_name, target_type_name=None):
     """
     Safely find a family symbol by name
