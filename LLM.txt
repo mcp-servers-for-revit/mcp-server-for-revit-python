@@ -510,6 +510,7 @@ Your Module for Revit MCP
 Handles your specific functionality.
 """
 from pyrevit import routes, revit, DB
+from System import Int64
 import json
 import logging
 
@@ -543,7 +544,9 @@ def register_your_routes(api):
             try:
                 element_id = data.get("element_id")
                 new_value = data.get("new_value")
-                element = doc.GetElement(DB.ElementId(int(element_id)))
+                # Revit 2026: cast through System.Int64 to disambiguate the
+                # ElementId(BuiltInParameter / BuiltInCategory / Int64) overloads.
+                element = doc.GetElement(DB.ElementId(Int64(int(element_id))))
                 
                 param = element.LookupParameter("Comments")
                 param.Set(new_value)
