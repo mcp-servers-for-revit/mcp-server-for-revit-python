@@ -5,6 +5,7 @@ import os
 import subprocess
 import json
 import anyio
+from typing import Optional
 from mcp.server.fastmcp import Context
 from .utils import format_response
 
@@ -185,9 +186,9 @@ def register_launch_tools(mcp, revit_get):
     @mcp.tool()
     async def launch_revit(
         ctx: Context,
-        file_path: str = None,
-        version: str = None,
-        language: str = None,
+        file_path: Optional[str] = None,
+        version: Optional[str] = None,
+        language: Optional[str] = None,
         timeout: int = 120,
     ) -> str:
         """Launch Revit on this machine, optionally opening a file.
