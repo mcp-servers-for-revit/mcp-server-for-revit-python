@@ -97,13 +97,13 @@ They never conflict because they serve different roles, speak different protocol
 | `close_document` | ✅ Implemented | Launch & Document | Close the active document |
 | `save_document` | ✅ Implemented | Launch & Document | Save or Save As the active document |
 | `sync_with_central` | ✅ Implemented | Launch & Document | Synchronize a workshared document with central |
-| `get_selected_elements` | 🔄 Pending | Selection Management | Get information about currently selected elements |
-| `create_line_based_element` | 🔄 Pending | Element Creation | Create line-based elements (walls, beams, pipes) |
+| `get_selected_elements` | ✅ Implemented | Selection Management | Get information about currently selected elements |
+| `create_line_based_element` | ✅ Implemented | Element Creation | Create line-based elements (walls only for now; beams/pipes pending) |
 | `create_surface_based_element` | 🔄 Pending | Element Creation | Create surface-based elements (floors, ceilings) |
-| `delete_elements` | 🔄 Pending | Element Management | Delete specified elements from the model |
-| `modify_element` | 🔄 Pending | Element Management | Modify element properties (instance parameters) |
+| `delete_elements` | ✅ Implemented | Element Management | Delete specified elements from the model |
+| `modify_element` | ✅ Implemented | Element Management | Modify element properties (instance parameters) |
 | `reset_model` | 🔄 Pending | Element Management | Reset model by deleting process model elements |
-| `tag_walls` | 🔄 Pending | Annotation | Tag all walls in the current view |
+| `tag_walls` | ✅ Implemented | Annotation | Tag all walls in the current view |
 | `search_modules` | 🔄 Pending | Integration | Search for available modules/addins |
 | `use_module` | 🔄 Pending | Integration | Execute functionality from external modules |
 
@@ -438,3 +438,4 @@ This is a work in progress and more of a demonstration than a fully-featured pro
 
 Contributions are welcome! Feel free to submit pull requests or open issues for any bugs or feature requests.
 Feel free to reach out to me if you have any questions, ideas
+

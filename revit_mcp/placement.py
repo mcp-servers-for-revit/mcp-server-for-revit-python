@@ -497,4 +497,275 @@ def register_placement_routes(api):
                 data={"error": "Failed to list levels: {}".format(str(e))}, status=500
             )
 
+    @api.route("/create_line_based_element/", methods=["POST"])
+    def create_line_based_element(doc, request):
+        """
+        Create a line-based element in the model. Currently only "wall" is supported.
+
+        Expected request data:
+        {
+            "element_type": "wall",
+            "wall_type_name": "Generic - 200mm",
+            "start_point": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "end_point": {"x": 10.0, "y": 0.0, "z": 0.0},
+            "level_name": "Level 1",
+            "height": 10.0,
+            "offset": 0.0,
+            "flip": false,
+            "structural": false,
+            "properties": {"Comments": "Created via MCP"}
+        }
+
+        Coordinates and height are in Revit internal units (feet).
+        """
+        data = None
+        try:
+            if not doc:
+                return routes.make_response(
+                    data={"error": "No active Revit document"}, status=503
+                )
+
+            if not request or not request.data:
+                return routes.make_response(
+                    data={"error": "No data provided or invalid request format"},
+                    status=400,
+                )
+
+            if isinstance(request.data, str):
+                try:
+                    data = json.loads(request.data)
+                except Exception as json_err:
+                    return routes.make_response(
+                        data={
+                            "error": "Invalid JSON format: {}".format(str(json_err))
+                        },
+                        status=400,
+                    )
+            else:
+                data = request.data
+
+            if not data or not isinstance(data, dict):
+                return routes.make_response(
+                    data={"error": "Invalid data format - expected JSON object"},
+                    status=400,
+                )
+
+            element_type = normalize_string(data.get("element_type", "wall")).lower()
+            if element_type != "wall":
+                return routes.make_response(
+                    data={
+                        "error": "element_type '{}' is not supported yet. Only "
+                        "'wall' is currently supported for "
+                        "create_line_based_element.".format(element_type)
+                    },
+                    status=400,
+                )
+
+            wall_type_name = data.get("wall_type_name")
+            start_point = data.get("start_point", {})
+            end_point = data.get("end_point", {})
+            level_name = data.get("level_name")
+            height = data.get("height", 10.0)
+            offset = data.get("offset", 0.0)
+            flip = bool(data.get("flip", False))
+            structural = bool(data.get("structural", False))
+            properties = data.get("properties", {})
+
+            if not wall_type_name:
+                return routes.make_response(
+                    data={"error": "No wall_type_name provided"}, status=400
+                )
+
+            if not start_point or not all(k in start_point for k in ["x", "y", "z"]):
+                return routes.make_response(
+                    data={
+                        "error": "Invalid start_point - must include x, y, z coordinates"
+                    },
+                    status=400,
+                )
+
+            if not end_point or not all(k in end_point for k in ["x", "y", "z"]):
+                return routes.make_response(
+                    data={
+                        "error": "Invalid end_point - must include x, y, z coordinates"
+                    },
+                    status=400,
+                )
+
+            if not level_name:
+                return routes.make_response(
+                    data={"error": "No level_name provided"}, status=400
+                )
+
+            # Find the wall type
+            wall_type = None
+            wall_types = (
+                DB.FilteredElementCollector(doc).OfClass(DB.WallType).ToElements()
+            )
+            for wt in wall_types:
+                try:
+                    if normalize_string(get_element_name(wt)) == normalize_string(
+                        wall_type_name
+                    ):
+                        wall_type = wt
+                        break
+                except Exception:
+                    continue
+
+            if not wall_type:
+                available_types = sorted(
+                    set(
+                        normalize_string(get_element_name(wt)) for wt in wall_types
+                    )
+                )
+                return routes.make_response(
+                    data={
+                        "error": "Wall type not found: {}".format(wall_type_name),
+                        "available_wall_types": available_types[:30],
+                    },
+                    status=404,
+                )
+
+            # Find the level
+            target_level = None
+            levels = (
+                DB.FilteredElementCollector(doc)
+                .OfCategory(DB.BuiltInCategory.OST_Levels)
+                .WhereElementIsNotElementType()
+                .ToElements()
+            )
+            for level in levels:
+                try:
+                    if normalize_string(get_element_name(level)) == normalize_string(
+                        level_name
+                    ):
+                        target_level = level
+                        break
+                except Exception:
+                    continue
+
+            if not target_level:
+                return routes.make_response(
+                    data={"error": "Level not found: {}".format(level_name)},
+                    status=404,
+                )
+
+            # Build the location curve
+            try:
+                p1 = DB.XYZ(
+                    float(start_point["x"]),
+                    float(start_point["y"]),
+                    float(start_point["z"]),
+                )
+                p2 = DB.XYZ(
+                    float(end_point["x"]), float(end_point["y"]), float(end_point["z"])
+                )
+            except (ValueError, TypeError) as coord_error:
+                return routes.make_response(
+                    data={"error": "Invalid coordinates: {}".format(str(coord_error))},
+                    status=400,
+                )
+
+            if p1.DistanceTo(p2) < 0.01:
+                return routes.make_response(
+                    data={
+                        "error": "start_point and end_point are too close together "
+                        "(or identical) to define a wall line"
+                    },
+                    status=400,
+                )
+
+            curve = DB.Line.CreateBound(p1, p2)
+
+            logger.info(
+                "Creating wall: type={}, level={}".format(wall_type_name, level_name)
+            )
+
+            transaction_name = "Create Line-Based Element via MCP"
+            t = DB.Transaction(doc, transaction_name)
+            t.Start()
+
+            try:
+                new_wall = DB.Wall.Create(
+                    doc,
+                    curve,
+                    wall_type.Id,
+                    target_level.Id,
+                    float(height),
+                    float(offset),
+                    flip,
+                    structural,
+                )
+
+                logger.info(
+                    "Wall created with ID: {}".format(
+                        element_id_value(new_wall.Id)
+                    )
+                )
+
+                properties_set = []
+                properties_failed = []
+
+                for param_name, param_value in properties.items():
+                    try:
+                        param = new_wall.LookupParameter(param_name)
+                        if param and not param.IsReadOnly:
+                            if param.StorageType == DB.StorageType.String:
+                                param.Set(str(param_value))
+                                properties_set.append(param_name)
+                            elif param.StorageType == DB.StorageType.Integer:
+                                param.Set(int(param_value))
+                                properties_set.append(param_name)
+                            elif param.StorageType == DB.StorageType.Double:
+                                param.Set(float(param_value))
+                                properties_set.append(param_name)
+                            else:
+                                properties_failed.append(
+                                    "{} (unsupported type)".format(param_name)
+                                )
+                        else:
+                            if param:
+                                properties_failed.append(
+                                    "{} (read-only)".format(param_name)
+                                )
+                            else:
+                                properties_failed.append(
+                                    "{} (not found)".format(param_name)
+                                )
+                    except Exception as param_error:
+                        properties_failed.append(
+                            "{} (error: {})".format(param_name, str(param_error))
+                        )
+
+                t.Commit()
+                logger.info("Transaction committed successfully")
+
+            except Exception as tx_error:
+                if t.HasStarted() and not t.HasEnded():
+                    t.RollBack()
+                    logger.error("Transaction rolled back due to error")
+                raise tx_error
+
+            return routes.make_response(
+                data={
+                    "status": "success",
+                    "element_id": element_id_value(new_wall.Id),
+                    "element_type": "wall",
+                    "wall_type": wall_type_name,
+                    "level": level_name,
+                    "start_point": {"x": p1.X, "y": p1.Y, "z": p1.Z},
+                    "end_point": {"x": p2.X, "y": p2.Y, "z": p2.Z},
+                    "height": height,
+                    "properties_set": properties_set,
+                    "properties_failed": properties_failed,
+                }
+            )
+
+        except Exception as e:
+            logger.error("Failed to create line-based element: {}".format(str(e)))
+            error_trace = traceback.format_exc()
+            return routes.make_response(
+                data={"error": str(e), "traceback": error_trace}, status=500
+            )
+
     logger.info("Placement routes registered successfully")
