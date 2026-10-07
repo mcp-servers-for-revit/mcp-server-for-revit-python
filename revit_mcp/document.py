@@ -8,9 +8,45 @@ from pyrevit import routes, revit, DB
 from Autodesk.Revit.UI import RevitCommandId, PostableCommand
 import json
 import logging
+import time
 import traceback
 
 logger = logging.getLogger(__name__)
+
+IDNO = 7
+SAVE_PROMPT_ID = "TaskDialog_Save_File"
+# How long a close_document call may wait for its own save prompt. After this
+# the handler detaches without answering, so it never touches a prompt that
+# belongs to a close the user started by hand.
+SAVE_PROMPT_WINDOW = 60
+
+
+def _answer_next_save_prompt(uiapp, answer, doc_title):
+    """Answer the next "Save changes?" prompt once, then detach.
+
+    PostCommand(Close) on a modified document raises TaskDialog_Save_File.
+    Nothing answers it from an API call, so it blocks the UI thread and every
+    later MCP call times out. Only this close's prompt is answered.
+    """
+    started = time.time()
+
+    def handler(sender, args):
+        try:
+            if time.time() - started > SAVE_PROMPT_WINDOW:
+                uiapp.DialogBoxShowing -= handler
+                return
+            if getattr(args, "DialogId", None) == SAVE_PROMPT_ID:
+                args.OverrideResult(answer)
+                uiapp.DialogBoxShowing -= handler
+                logger.info(
+                    "Answered save prompt for '{}' with {}".format(doc_title, answer)
+                )
+        except Exception as e:
+            # Never raise from a dialog handler - it would break the dialog
+            logger.error("Save prompt handler failed: {}".format(str(e)))
+
+    uiapp.DialogBoxShowing += handler
+    return handler
 
 
 def register_document_routes(api):
@@ -161,29 +197,52 @@ def register_document_routes(api):
                 try:
                     doc.Save()
                 except Exception as save_err:
-                    logger.warning(
+                    # Don't close: closing now would discard the unsaved work
+                    logger.error(
                         "Save before close failed: {}".format(str(save_err))
                     )
+                    return routes.make_response(
+                        data={
+                            "error": "Save failed, document left open: {}".format(
+                                str(save_err)
+                            )
+                        },
+                        status=500,
+                    )
+
+            uiapp = revit.HOST_APP.uiapp
+            discarded = doc.IsModified
+
+            # Without this the "Save changes?" prompt blocks Revit.
+            # save=True has already saved, so a prompt here means discard.
+            handler = None
+            if discarded:
+                handler = _answer_next_save_prompt(uiapp, IDNO, doc_title)
 
             # Use PostCommand to close the active document since
             # doc.Close() is not allowed on the active document from the API
-            uiapp = revit.HOST_APP.uiapp
             close_cmd = RevitCommandId.LookupPostableCommandId(
                 PostableCommand.Close
             )
-            uiapp.PostCommand(close_cmd)
+            try:
+                uiapp.PostCommand(close_cmd)
+            except Exception:
+                if handler is not None:
+                    uiapp.DialogBoxShowing -= handler
+                raise
 
             return routes.make_response(
                 data={
                     "status": "success",
                     "message": "Document '{}' close command sent{}.".format(
                         doc_title,
-                        " (saved first)" if save else "",
+                        " (saved first)" if save
+                        else " (unsaved changes discarded)" if discarded
+                        else "",
                     ),
                     "document_title": doc_title,
                     "saved": save,
-                    "note": "Revit may show a confirmation dialog if there "
-                    "are unsaved changes.",
+                    "discarded_changes": discarded,
                 }
             )
 
