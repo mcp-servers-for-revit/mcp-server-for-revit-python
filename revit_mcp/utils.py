@@ -67,7 +67,7 @@ def find_family_symbol_safely(doc, target_family_name, target_type_name=None):
 
         for symbol in collector:
             if symbol.Family.Name == target_family_name:
-                if not target_type_name or symbol.Name == target_type_name:
+                if not target_type_name or get_element_name(symbol) == target_type_name:
                     return symbol
         return None
     except Exception as e:
