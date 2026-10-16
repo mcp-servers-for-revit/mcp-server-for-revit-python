@@ -97,21 +97,48 @@ def get_token():
         raise PairingError("Use Revit's MCP > Bridge > Connect button to consent and pair this Windows user.")
 
 
+# pyRevit Routes does not expose HTTP headers to route handlers, so bridge
+# requests carry the secret in this JSON body field instead of Authorization.
+AUTH_FIELD = "revit_mcp_auth"
+
+
 def authorization_headers():
     return {"Authorization": "Bearer " + get_token()}
 
 
-def validate_request(headers):
-    """Reject browser-originated requests and authenticate a paired client."""
-    import hmac
-    normalized = dict((str(k).lower(), str(v)) for k, v in headers.items())
+def authorization_body(data=None):
+    """Return a copy of a JSON object payload with the pairing secret added."""
+    body = dict(data or {})
+    body[AUTH_FIELD] = get_token()
+    return body
+
+
+def validate_request(headers, body_token=None):
+    """Reject browser-originated requests and authenticate a paired client.
+
+    The Authorization header wins when present; otherwise the secret popped from
+    the JSON body (see AUTH_FIELD) is checked.
+    """
+    normalized = dict((str(k).lower(), str(v)) for k, v in (headers or {}).items())
     if "origin" in normalized:
         return False
     try:
-        expected = "Bearer " + get_token()
+        token = get_token()
     except PairingError:
         return False
-    actual = normalized.get("authorization", "")
+    if "authorization" in normalized:
+        return _same_secret(normalized["authorization"], "Bearer " + token)
+    if body_token is None:
+        return False
+    try:
+        return _same_secret(str(body_token), token)
+    except UnicodeError:
+        return False
+
+
+def _same_secret(actual, expected):
+    """Compare secrets in constant time."""
+    import hmac
     # IronPython 2 may not provide compare_digest.
     if hasattr(hmac, "compare_digest"):
         try:

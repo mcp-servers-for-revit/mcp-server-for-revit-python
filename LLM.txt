@@ -306,6 +306,11 @@ def test_headers(request):
     headers = request.headers  # dictionary of header key:value
 ```
 
+Note: pyRevit 7.0 never fills `request.headers` (it is always `{}`). This
+extension therefore authenticates bridge calls with the `revit_mcp_auth` field
+of the JSON body, which `authorize_request` removes before the route reads
+`request.data`.
+
 ### Returning Results
 
 The `routes.make_response` function can be used to prepare a `routes.Response` object:

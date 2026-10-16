@@ -176,7 +176,7 @@ Once installed, test that the Routes API is working:
 
 1. Choose **MCP > Bridge > Connect** in Revit, then run this authenticated
    check from the exact candidate directory (a browser request has no pairing
-   header and is denied):
+   secret and is denied):
    ```bash
    uv run --frozen python -c "import anyio; from main import revit_get; print(anyio.run(revit_get, '/status/'))"
    ```
