@@ -96,6 +96,42 @@ def test_revit_review_decline_and_accept_show_request(route_security, paired_use
     assert security.authorize_request(request, "Execute Python code").status == 400
 
 
+def test_pyrevit_requests_receive_http_headers(route_security, paired_user):
+    from email.message import Message
+    security, _, _ = route_security
+
+    class Request(object):
+        def __init__(self):
+            self.data, self.headers = {}, {}
+
+        def add_header(self, key, value):
+            self.headers[key] = value
+
+    class Handler(object):
+        # pyRevit's HttpRequestHandler builds requests without HTTP headers.
+        def _prepare_request(self, route, path, method):
+            return Request()
+
+    handler = Handler()
+    handler.headers = Message()
+    for key, value in pairing.authorization_headers().items():
+        handler.headers[key] = value
+    assert security.authorize_request(handler._prepare_request(None, "/status/", "GET")).status == 401
+    log = Mock()
+    assert security.install_header_passthrough(Handler, log) is True
+    patched = Handler._prepare_request
+    assert security.install_header_passthrough(Handler, log) is False
+    assert Handler._prepare_request is patched
+    assert security.authorize_request(handler._prepare_request(None, "/status/", "GET")) is None
+    log.assert_not_called()
+
+    # A header failure must not break pyRevit's routes; the request is denied instead.
+    handler.headers = SimpleNamespace(items=Mock(side_effect=RuntimeError("boom")))
+    request = handler._prepare_request(None, "/status/", "GET")
+    assert security.authorize_request(request).status == 401
+    assert "boom" in log.call_args.args[0]
+
+
 def _route_functions():
     functions = []
     for path in (ROOT / "revit_mcp").glob("*.py"):
