@@ -4,10 +4,14 @@ Revit MCP Extension Startup
 Registers all MCP routes and initializes the API
 """
 
-from pyrevit import routes
+from pyrevit import routes, HOST_APP
 import logging
+from revit_mcp.routes_compat import install_when_server_starts
 
 logger = logging.getLogger(__name__)
+
+# Pairing authentication needs request headers, which some pyRevit versions drop
+install_when_server_starts(HOST_APP.uiapp, logger)
 
 # Initialize the main API
 api = routes.API("revit_mcp")
