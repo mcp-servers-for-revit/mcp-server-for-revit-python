@@ -9,6 +9,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# pyRevit Routes does not forward HTTP headers to handlers; the pairing check
+# needs the Authorization header, so make the live server pass headers through.
+# The server is created after startup scripts run, so patch on first idle.
+try:
+    from pyrevit import HOST_APP
+    from revit_mcp.header_passthrough import install_deferred_patch
+
+    install_deferred_patch(HOST_APP.uiapp)
+except Exception as header_error:
+    logger.warning("Revit MCP: header pass-through not installed: %s", header_error)
+
 # Initialize the main API
 api = routes.API("revit_mcp")
 
