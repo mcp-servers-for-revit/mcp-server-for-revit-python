@@ -24,10 +24,15 @@ def pairing_path():
 def _dpapi(data, protect):
     if sys.platform == "cli":
         import clr
-        try:
-            clr.AddReference("System.Security.Cryptography.ProtectedData")
-        except Exception:
-            clr.AddReference("System.Security")
+        # .NET Framework (Revit <= 2024) ships ProtectedData in System.Security;
+        # .NET 8 (Revit 2025+) ships it in its own assembly. A facade named
+        # System.Security.Cryptography.ProtectedData may load on .NET Framework
+        # without exposing the type, so reference both rather than either/or.
+        for assembly in ("System.Security", "System.Security.Cryptography.ProtectedData"):
+            try:
+                clr.AddReference(assembly)
+            except Exception:
+                pass
         from System import Array, Byte
         from System.Security.Cryptography import ProtectedData, DataProtectionScope
         operation = ProtectedData.Protect if protect else ProtectedData.Unprotect
