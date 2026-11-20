@@ -54,3 +54,17 @@ def register_routes():
 
 # Register all routes when the extension loads
 register_routes()
+
+
+def install_header_passthrough():
+    """Make pairing headers reach routes on pyRevit builds that drop them."""
+    try:
+        from pyrevit import HOST_APP
+        from revit_mcp.header_passthrough import install
+
+        install(HOST_APP.uiapp)
+    except Exception as e:
+        logger.error("Failed to install header passthrough: %s", str(e))
+
+
+install_header_passthrough()
