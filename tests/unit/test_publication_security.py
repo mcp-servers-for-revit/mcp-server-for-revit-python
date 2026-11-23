@@ -83,6 +83,25 @@ def test_route_rejects_callback_without_dispatching_it(route_security, paired_us
     alert.assert_not_called()
 
 
+def test_route_accepts_pairing_query_param_when_pyrevit_drops_headers(route_security, paired_user):
+    # pyRevit's routes server builds Request objects with empty headers.
+    security, _, alert = route_security
+    request = SimpleNamespace(data=None, headers={}, query_params=pairing.bridge_query_params())
+    assert security.authorize_request(request) is None
+    for query in ({}, {pairing.PAIRING_QUERY_PARAM: "wrong"},
+                  {pairing.PAIRING_QUERY_PARAM: [paired_user, paired_user]}):
+        request = SimpleNamespace(data=None, headers={}, query_params=query)
+        assert security.authorize_request(request).status == 401
+    # A browser-originated header still blocks an otherwise valid token.
+    request = SimpleNamespace(data=None, headers={"Origin": "https://example.com"},
+                              query_params=pairing.bridge_query_params())
+    assert security.authorize_request(request).status == 401
+    pairing.enable_pairing()
+    request = SimpleNamespace(data=None, headers={}, query_params={pairing.PAIRING_QUERY_PARAM: paired_user})
+    assert security.authorize_request(request).status == 401
+    alert.assert_not_called()
+
+
 def test_revit_review_decline_and_accept_show_request(route_security, paired_user):
     security, _, alert = route_security
     request = SimpleNamespace(data={"code": "print('review me')"}, headers=pairing.authorization_headers())

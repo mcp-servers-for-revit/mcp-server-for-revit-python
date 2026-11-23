@@ -224,6 +224,8 @@ After pairing, this starts the authenticated server on `http://127.0.0.1:8000` w
 
 The following unpaired requests return HTTP 401. HTTP clients must include the header returned by `revit_mcp.pairing.authorization_headers()`; prefer stdio to avoid copying a secret into client configuration.
 
+Calls from this server to the pyRevit Routes bridge in Revit also carry the pairing token as the `revit_mcp_pairing` query parameter (`revit_mcp.pairing.bridge_query_params()`). pyRevit's routes server does not pass HTTP request headers to route handlers, so the Revit side checks that parameter when no `Authorization` header arrives. These calls stay on the loopback interface, but the token can appear in pyRevit's debug-level request log.
+
 **Testing the endpoints:**
 ```bash
 # Test streamable-http

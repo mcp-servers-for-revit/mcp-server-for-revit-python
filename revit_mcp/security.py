@@ -2,7 +2,7 @@
 """Authentication and in-Revit review for bridge requests."""
 import json
 from pyrevit import routes
-from .pairing import validate_request
+from .pairing import validate_request, bridge_request_headers
 
 
 def authorize_request(request, action=None):
@@ -12,7 +12,9 @@ def authorize_request(request, action=None):
     if isinstance(request.data, dict) and "callbackUrl" in request.data:
         request.data.pop("callbackUrl", None)
         return routes.make_response(data={"error": "Callbacks are not supported."}, status=400)
-    if not validate_request(request.headers):
+    headers = bridge_request_headers(getattr(request, "headers", None),
+                                     getattr(request, "query_params", None))
+    if not validate_request(headers):
         return routes.make_response(data={"error": "Bridge is disconnected or pairing is invalid."}, status=401)
     if action:
         from pyrevit import forms

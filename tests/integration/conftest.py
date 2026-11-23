@@ -3,7 +3,7 @@
 import os
 import pytest
 import httpx
-from revit_mcp.pairing import authorization_headers, get_token
+from revit_mcp.pairing import authorization_headers, bridge_query_params, get_token
 
 BASE_URL = "http://127.0.0.1:48884/revit_mcp"
 TEST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test.rvt")
@@ -12,7 +12,8 @@ TEST_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test.rvt")
 async def _revit_get(endpoint, ctx=None, **kwargs):
     """Real HTTP GET to pyRevit Routes."""
     timeout = kwargs.pop("timeout", 30.0)
-    async with httpx.AsyncClient(timeout=timeout, trust_env=False, headers=authorization_headers()) as client:
+    async with httpx.AsyncClient(timeout=timeout, trust_env=False, headers=authorization_headers(),
+                                     params=bridge_query_params()) as client:
         response = await client.get(f"{BASE_URL}{endpoint}")
         if response.status_code == 200:
             return response.json()
@@ -21,7 +22,8 @@ async def _revit_get(endpoint, ctx=None, **kwargs):
 
 async def _revit_post(endpoint, data, ctx=None, **kwargs):
     """Real HTTP POST to pyRevit Routes."""
-    async with httpx.AsyncClient(timeout=120.0, trust_env=False, headers=authorization_headers()) as client:
+    async with httpx.AsyncClient(timeout=120.0, trust_env=False, headers=authorization_headers(),
+                                     params=bridge_query_params()) as client:
         response = await client.post(f"{BASE_URL}{endpoint}", json=data)
         if response.status_code == 200:
             return response.json()

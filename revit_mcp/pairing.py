@@ -2,7 +2,9 @@
 """Per-Windows-user pairing, shared by CPython and IronPython.
 
 The bearer secret is encrypted with Windows DPAPI CurrentUser. It is never
-included in the extension, manifest, URLs, or logs. Other processes running
+included in the extension or manifest. Bridge calls to pyRevit's loopback
+routes server carry it as a query parameter (see PAIRING_QUERY_PARAM), so it
+can appear in pyRevit's own debug-level request log. Other processes running
 as the same Windows user remain inside this trust boundary.
 """
 import binascii
@@ -99,6 +101,32 @@ def get_token():
 
 def authorization_headers():
     return {"Authorization": "Bearer " + get_token()}
+
+
+# pyRevit's routes server does not forward HTTP request headers to route
+# handlers (Request.headers is always empty), so bridge calls also carry the
+# token as a query parameter, which pyRevit does pass through.
+PAIRING_QUERY_PARAM = "revit_mcp_pairing"
+
+
+def bridge_query_params():
+    return {PAIRING_QUERY_PARAM: get_token()}
+
+
+def bridge_request_headers(headers, query_params):
+    """Headers to validate for a pyRevit route request.
+
+    Uses the real Authorization header when pyRevit provides one, otherwise
+    the token from the pairing query parameter.
+    """
+    merged = dict(headers or {})
+    if any(str(key).lower() == "authorization" for key in merged):
+        return merged
+    token = (query_params or {}).get(PAIRING_QUERY_PARAM)
+    # A repeated parameter arrives as a list; reject anything but one string.
+    if isinstance(token, basestring if sys.version_info[0] == 2 else str):  # noqa: F821
+        merged["Authorization"] = "Bearer " + token
+    return merged
 
 
 def validate_request(headers):
