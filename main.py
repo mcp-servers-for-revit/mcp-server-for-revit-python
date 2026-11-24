@@ -6,7 +6,7 @@ import anyio
 from mcp.server.fastmcp import FastMCP, Image, Context
 import base64
 from typing import Optional, Dict, Any, Union
-from revit_mcp.pairing import authorization_headers
+from revit_mcp.pairing import authorization_body, authorization_headers
 from tools.http_security import PairingMiddleware
 
 # Create a generic MCP server for interacting with Revit
@@ -46,8 +46,8 @@ async def revit_image(endpoint: str, ctx: Context = None) -> Union[Image, str]:
     """GET request that returns an Image object"""
     try:
         async with httpx.AsyncClient(timeout=60.0, trust_env=False, headers=authorization_headers()) as client:
-            response = await client.get(f"{BASE_URL}{endpoint}")
-            
+            response = await client.request("GET", f"{BASE_URL}{endpoint}", json=authorization_body())
+
             if response.status_code == 200:
                 data = response.json()
                 image_bytes = base64.b64decode(data["image_data"])
@@ -68,10 +68,13 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Contex
         async with httpx.AsyncClient(timeout=timeout, trust_env=False, headers=authorization_headers()) as client:
             url = f"{BASE_URL}{endpoint}"
 
+            # pyRevit Routes does not pass HTTP headers to route handlers, so the
+            # pairing secret also travels in the JSON body, GET included. The
+            # Authorization header stays for pyRevit builds that do forward it.
             if method == "GET":
-                response = await client.get(url, params=params)
+                response = await client.request("GET", url, params=params, json=authorization_body())
             else:  # POST
-                response = await client.post(url, json=data, headers={"Content-Type": "application/json"})
+                response = await client.post(url, json=authorization_body(data))
 
             return response.json() if response.status_code == 200 else f"Error: {response.status_code} - {response.text}"
     except httpx.TimeoutException:
