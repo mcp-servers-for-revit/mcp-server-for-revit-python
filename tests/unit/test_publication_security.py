@@ -154,8 +154,93 @@ async def test_revit_http_client_has_auth_and_ignores_proxies(paired_user, monke
         return original(transport=httpx.MockTransport(handler), **kwargs)
     monkeypatch.setattr(main.httpx, "AsyncClient", client)
     assert await main.revit_get("/status/") == {"status": "active"}
-    assert observed[0].headers["authorization"] == "Bearer " + paired_user
-    assert observed[0].url.host in {"127.0.0.1", "localhost", "::1"}
+    assert await main.revit_post("/execute_code/", {"code": "1"}) == {"status": "active"}
+    assert (await main.revit_image("/view_image/")).startswith("Error")  # mock has no image_data
+    # pyRevit Routes hides headers from handlers, so the secret is also in the body.
+    assert json.loads(observed[0].content) == {pairing.AUTH_FIELD: paired_user}
+    assert json.loads(observed[1].content) == {"code": "1", pairing.AUTH_FIELD: paired_user}
+    assert json.loads(observed[2].content) == {pairing.AUTH_FIELD: paired_user}
+    for request in observed:
+        assert request.headers["authorization"] == "Bearer " + paired_user
+        assert request.headers["content-type"] == "application/json"
+        assert paired_user not in str(request.url)
+        assert request.url.host in {"127.0.0.1", "localhost", "::1"}
+
+
+async def test_concurrent_revit_calls_do_not_share_responses(paired_user, monkeypatch):
+    # pyRevit Routes runs every request through one shared ExternalEvent
+    # handler, so overlapping requests get each other's responses. Model that:
+    # the bridge answers with whichever endpoint arrived last.
+    import asyncio
+    import main
+    original = httpx.AsyncClient
+    state = {"current": None, "in_flight": 0, "max_in_flight": 0}
+
+    async def handler(request):
+        state["current"] = request.url.path
+        state["in_flight"] += 1
+        state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+        await asyncio.sleep(0.02)
+        state["in_flight"] -= 1
+        return httpx.Response(200, json={"path": state["current"]})
+
+    class Transport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return await handler(request)
+
+    def client(**kwargs):
+        return original(transport=Transport(), **kwargs)
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", client)
+    status, view = await asyncio.gather(
+        main.revit_get("/status/"), main.revit_get("/current_view_info/")
+    )
+    assert status == {"path": "/revit_mcp/status/"}
+    assert view == {"path": "/revit_mcp/current_view_info/"}
+    assert state["max_in_flight"] == 1
+
+
+def test_body_token_authenticates_when_headers_are_hidden(paired_user):
+    assert pairing.validate_request({}, paired_user)
+    assert pairing.validate_request(None, paired_user)
+    assert not pairing.validate_request({}, "wrong")
+    assert not pairing.validate_request({}, None)
+    assert not pairing.validate_request({}, "")
+    assert not pairing.validate_request({}, {"nested": paired_user})
+    assert not pairing.validate_request({"Origin": "null"}, paired_user)
+    # A header, when pyRevit forwards one, is authoritative over the body.
+    assert not pairing.validate_request({"Authorization": "Bearer wrong"}, paired_user)
+    assert pairing.authorization_body({"a": 1}) == {"a": 1, pairing.AUTH_FIELD: paired_user}
+    pairing.disable_pairing()
+    assert not pairing.validate_request({}, paired_user)
+
+
+@pytest.mark.parametrize("as_json_text", [False, True])
+def test_route_accepts_body_token_and_strips_it_before_review(route_security, paired_user, as_json_text):
+    security, _, alert = route_security
+    payload = pairing.authorization_body({"code": "print('review me')"})
+    request = SimpleNamespace(data=json.dumps(payload) if as_json_text else payload, headers={})
+    alert.return_value = True
+    assert security.authorize_request(request, "Execute Python code") is None
+    assert request.data == {"code": "print('review me')"}
+    assert paired_user not in alert.call_args.kwargs["sub_msg"]
+
+
+def test_route_rejects_wrong_or_missing_body_token(route_security, paired_user):
+    security, _, alert = route_security
+    request = SimpleNamespace(data={pairing.AUTH_FIELD: "wrong"}, headers={})
+    assert security.authorize_request(request).status == 401
+    assert request.data == {}
+    assert security.authorize_request(SimpleNamespace(data=None, headers={})).status == 401
+    alert.assert_not_called()
+
+
+def test_callback_rejected_even_with_body_token(route_security, paired_user):
+    security, _, alert = route_security
+    request = SimpleNamespace(data=pairing.authorization_body({"callbackUrl": "https://example.com"}), headers={})
+    assert security.authorize_request(request).status == 400
+    assert request.data == {}
+    alert.assert_not_called()
 
 
 @pytest.mark.parametrize("transport_name", ["sse", "streamable-http", "combined"])

@@ -9,6 +9,11 @@ import binascii
 import os
 import sys
 
+# pyRevit Routes (6.x and 7.0) builds each route request without copying the
+# HTTP headers, so route handlers never see Authorization. Bridge calls also
+# carry the secret in this JSON body field; routes remove it before use.
+AUTH_FIELD = "revit_mcp_auth"
+
 
 class PairingError(RuntimeError):
     pass
@@ -24,10 +29,15 @@ def pairing_path():
 def _dpapi(data, protect):
     if sys.platform == "cli":
         import clr
-        try:
-            clr.AddReference("System.Security.Cryptography.ProtectedData")
-        except Exception:
-            clr.AddReference("System.Security")
+        # .NET Framework (Revit <= 2024) ships ProtectedData in System.Security;
+        # .NET 8 (Revit 2025+) ships it in its own assembly. A facade with the
+        # .NET 8 name can load on .NET Framework without exposing the type, so
+        # reference both instead of stopping at the first that loads.
+        for assembly in ("System.Security", "System.Security.Cryptography.ProtectedData"):
+            try:
+                clr.AddReference(assembly)
+            except Exception:
+                pass
         from System import Array, Byte
         from System.Security.Cryptography import ProtectedData, DataProtectionScope
         operation = ProtectedData.Protect if protect else ProtectedData.Unprotect
@@ -93,7 +103,9 @@ def get_token():
         if len(token) != 64 or any(c not in "0123456789abcdef" for c in token):
             raise ValueError("Invalid pairing data")
         return token
-    except (OSError, ValueError, PairingError):
+    # IronPython 2 raises IOError, which is not an OSError there, for a
+    # missing file; letting it escape made pyRevit answer 408 instead of 401.
+    except (EnvironmentError, ValueError, PairingError):
         raise PairingError("Use Revit's MCP > Bridge > Connect button to consent and pair this Windows user.")
 
 
@@ -101,17 +113,40 @@ def authorization_headers():
     return {"Authorization": "Bearer " + get_token()}
 
 
-def validate_request(headers):
-    """Reject browser-originated requests and authenticate a paired client."""
-    import hmac
-    normalized = dict((str(k).lower(), str(v)) for k, v in headers.items())
+def authorization_body(data=None):
+    """Return a copy of a JSON object payload with the pairing secret added."""
+    body = dict(data or {})
+    body[AUTH_FIELD] = get_token()
+    return body
+
+
+def validate_request(headers, body_token=None):
+    """Reject browser-originated requests and authenticate a paired client.
+
+    An Authorization header is authoritative when one arrives. pyRevit Routes
+    drops headers, so otherwise the secret taken from the JSON body is checked.
+    """
+    normalized = dict((str(k).lower(), str(v)) for k, v in (headers or {}).items())
     if "origin" in normalized:
         return False
     try:
-        expected = "Bearer " + get_token()
+        token = get_token()
     except PairingError:
         return False
-    actual = normalized.get("authorization", "")
+    if "authorization" in normalized:
+        return _same_secret(normalized["authorization"], "Bearer " + token)
+    if not body_token or isinstance(body_token, (dict, list, bool, int, float)):
+        return False
+    try:
+        body_token = u"{}".format(body_token)
+    except Exception:
+        return False
+    return _same_secret(body_token, token)
+
+
+def _same_secret(actual, expected):
+    """Compare secrets in constant time."""
+    import hmac
     # IronPython 2 may not provide compare_digest.
     if hasattr(hmac, "compare_digest"):
         try:

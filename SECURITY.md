@@ -3,10 +3,16 @@
 The review candidate requires Windows-user pairing for every registered tool.
 The MCP client and all Revit bridge routes authenticate requests with a random
 256-bit bearer secret protected at rest by Windows DPAPI CurrentUser. Tokens are
-sent in headers, never URL parameters. The built-in client rejects non-loopback
-hosts and ignores environment HTTP proxies. Optional SSE/streamable HTTP modes
-bind to loopback and require the same bearer header. Browser Origin headers are
-rejected. The publication candidate uses `stdio`.
+never sent in URL parameters. pyRevit Routes (6.x and 7.0) does not pass HTTP
+headers to route handlers, so bridge calls send the secret both as an
+`Authorization: Bearer` header and in the `revit_mcp_auth` field of an
+`application/json` body (GET included). A header, when pyRevit exposes one, is
+authoritative; otherwise the body field is checked. Routes remove the field before
+the payload is used or shown for review. Browser Origin headers are rejected when
+pyRevit exposes them; where it does not, browser protection rests on the secret,
+which a web page cannot read. The built-in client rejects non-loopback hosts and
+ignores environment HTTP proxies. Optional SSE/streamable HTTP modes bind to
+loopback and require the bearer header. The publication candidate uses `stdio`.
 
 The Revit-side request review runs in pyRevit's Revit API context. Every bridge
 route requests a `request` argument and checks authorization before model access;
