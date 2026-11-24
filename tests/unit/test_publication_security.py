@@ -167,6 +167,39 @@ async def test_revit_http_client_has_auth_and_ignores_proxies(paired_user, monke
         assert request.url.host in {"127.0.0.1", "localhost", "::1"}
 
 
+async def test_concurrent_revit_calls_do_not_share_responses(paired_user, monkeypatch):
+    # pyRevit Routes runs every request through one shared ExternalEvent
+    # handler, so overlapping requests get each other's responses. Model that:
+    # the bridge answers with whichever endpoint arrived last.
+    import asyncio
+    import main
+    original = httpx.AsyncClient
+    state = {"current": None, "in_flight": 0, "max_in_flight": 0}
+
+    async def handler(request):
+        state["current"] = request.url.path
+        state["in_flight"] += 1
+        state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+        await asyncio.sleep(0.02)
+        state["in_flight"] -= 1
+        return httpx.Response(200, json={"path": state["current"]})
+
+    class Transport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return await handler(request)
+
+    def client(**kwargs):
+        return original(transport=Transport(), **kwargs)
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", client)
+    status, view = await asyncio.gather(
+        main.revit_get("/status/"), main.revit_get("/current_view_info/")
+    )
+    assert status == {"path": "/revit_mcp/status/"}
+    assert view == {"path": "/revit_mcp/current_view_info/"}
+    assert state["max_in_flight"] == 1
+
+
 def test_body_token_authenticates_when_headers_are_hidden(paired_user):
     assert pairing.validate_request({}, paired_user)
     assert pairing.validate_request(None, paired_user)

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import asyncio
 import os
 import sys
 import httpx
@@ -31,6 +32,12 @@ if not 1 <= REVIT_PORT <= 65535:
 URL_HOST = "[::1]" if REVIT_HOST == "::1" else REVIT_HOST
 BASE_URL = f"http://{URL_HOST}:{REVIT_PORT}/revit_mcp"
 
+# pyRevit Routes dispatches every request through one shared ExternalEvent
+# handler (pyrevit/routes/server/server.py: REQUEST_HNDLR). Two requests in
+# flight at once overwrite each other's handler, so both callers receive the
+# same response. Only one request may be outstanding at a time.
+_REVIT_LOCK = asyncio.Lock()
+
 
 async def revit_get(endpoint: str, ctx: Context = None, **kwargs) -> Union[Dict, str]:
     """Simple GET request to Revit API"""
@@ -45,7 +52,7 @@ async def revit_post(endpoint: str, data: Dict[str, Any], ctx: Context = None, *
 async def revit_image(endpoint: str, ctx: Context = None) -> Union[Image, str]:
     """GET request that returns an Image object"""
     try:
-        async with httpx.AsyncClient(timeout=60.0, trust_env=False, headers=authorization_headers()) as client:
+        async with _REVIT_LOCK, httpx.AsyncClient(timeout=60.0, trust_env=False, headers=authorization_headers()) as client:
             response = await client.request("GET", f"{BASE_URL}{endpoint}", json=authorization_body())
 
             if response.status_code == 200:
@@ -65,7 +72,7 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Contex
                      timeout: float = 30.0, params: Dict = None) -> Union[Dict, str]:
     """Internal function handling all HTTP calls"""
     try:
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False, headers=authorization_headers()) as client:
+        async with _REVIT_LOCK, httpx.AsyncClient(timeout=timeout, trust_env=False, headers=authorization_headers()) as client:
             url = f"{BASE_URL}{endpoint}"
 
             # pyRevit Routes does not pass HTTP headers to route handlers, so the
