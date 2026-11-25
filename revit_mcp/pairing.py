@@ -24,16 +24,24 @@ def pairing_path():
 def _dpapi(data, protect):
     if sys.platform == "cli":
         import clr
+        protected_data = None
         try:
-            clr.AddReference("System.Security.Cryptography.ProtectedData")
+            try:
+                clr.AddReference("System.Security.Cryptography.ProtectedData")
+            except Exception:
+                clr.AddReference("System.Security")
+            from System.Security.Cryptography import ProtectedData, DataProtectionScope
+            protected_data = ProtectedData
         except Exception:
-            clr.AddReference("System.Security")
-        from System import Array, Byte
-        from System.Security.Cryptography import ProtectedData, DataProtectionScope
-        operation = ProtectedData.Protect if protect else ProtectedData.Unprotect
-        result = operation(Array[Byte](bytearray(data)), None,
-                           DataProtectionScope.CurrentUser)
-        return bytes(bytearray(result))
+            # Revit 2025+ runs on .NET 8+, which does not ship ProtectedData.
+            # Fall through to the crypt32 ctypes path below (same DPAPI blob).
+            protected_data = None
+        if protected_data is not None:
+            from System import Array, Byte
+            operation = protected_data.Protect if protect else protected_data.Unprotect
+            result = operation(Array[Byte](bytearray(data)), None,
+                               DataProtectionScope.CurrentUser)
+            return bytes(bytearray(result))
 
     if os.name != "nt":
         raise PairingError("Pairing requires Windows DPAPI.")
@@ -95,6 +103,21 @@ def get_token():
         return token
     except (OSError, ValueError, PairingError):
         raise PairingError("Use Revit's MCP > Bridge > Connect button to consent and pair this Windows user.")
+    except Exception:
+        # Never let an unexpected error escape into pyRevit's route thread
+        # (it can crash Revit). Record the type/traceback, never the token.
+        _log_unexpected("get_token")
+        raise PairingError("Pairing could not be read; see pairing_error.log.")
+
+
+def _log_unexpected(where):
+    try:
+        import traceback
+        path = os.path.join(os.path.dirname(pairing_path()), "pairing_error.log")
+        with open(path, "a") as stream:
+            stream.write("[{}] platform={}\n{}\n".format(where, sys.platform, traceback.format_exc()))
+    except Exception:
+        pass
 
 
 def authorization_headers():
@@ -103,6 +126,14 @@ def authorization_headers():
 
 def validate_request(headers):
     """Reject browser-originated requests and authenticate a paired client."""
+    try:
+        return _validate_request(headers)
+    except Exception:
+        _log_unexpected("validate_request")
+        return False
+
+
+def _validate_request(headers):
     import hmac
     normalized = dict((str(k).lower(), str(v)) for k, v in headers.items())
     if "origin" in normalized:
